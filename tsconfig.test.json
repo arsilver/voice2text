@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "outDir": "tmp/test-dist",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/main/transcribe/session-plan.test.ts",
+    "src/main/transcribe/transcript-merge.test.ts",
+    "src/main/transcribe/openai-realtime.test.ts"
+  ]
+}

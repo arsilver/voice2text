@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.vite/
+tmp/
+logs/
+*.log
+resources/models/*.bin
+resources/whisper/Release/
+!resources/whisper/.gitkeep
+!resources/models/.gitkeep
+

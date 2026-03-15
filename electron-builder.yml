@@ -1,0 +1,32 @@
+appId: com.craftvoice.desktop
+productName: CraftVoice
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+  - node_modules/**/*
+extraResources:
+  - from: resources
+    to: resources
+asarUnpack:
+  - node_modules/**/*.node
+win:
+  icon: icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+portable:
+  artifactName: ${productName}-${version}-portable-${arch}.${ext}
