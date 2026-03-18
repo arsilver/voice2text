@@ -5,12 +5,16 @@ import { execFile } from "node:child_process";
 
 import type { AppSettings, ProviderHealth, TranscriptionResult } from "@shared/types";
 import { getLogger } from "@main/utils/logger";
+import { ensureManagedWhisperAssets } from "@main/local-models";
+import { isSafeModeEnabled } from "@main/utils/runtime-flags";
 import { getWhisperExecutablePath, getWhisperModelPath, getWhisperWorkingDirectory } from "@main/utils/paths";
-import { ensureServerReady, WHISPER_SERVER_URL } from "./whisper-server";
+import { ensureServerReady, getWhisperServerStatus, WHISPER_SERVER_URL } from "./whisper-server";
+import { transcribeWithPreferredWhisperRuntime } from "./whisper-runtime";
 
 const log = getLogger("whisper-local");
 
 export async function transcribeWithWhisper(buffer: Buffer, durationMs: number, settings: AppSettings): Promise<TranscriptionResult> {
+  ensureManagedWhisperAssets();
   const binaryPath = getWhisperExecutablePath();
   const modelPath = getWhisperModelPath(settings.whisperModel);
 
@@ -22,48 +26,24 @@ export async function transcribeWithWhisper(buffer: Buffer, durationMs: number, 
     throw new Error(`Whisper model not found: ${settings.whisperModel}`);
   }
 
-  // Write audio buffer to a temporary WAV file
-  const tmpDir = getWhisperWorkingDirectory();
-  const tmpFileName = `craftvoice_${crypto.randomUUID()}.wav`;
-  const tmpFilePath = path.join(tmpDir, tmpFileName);
-
-  try {
-    fs.writeFileSync(tmpFilePath, buffer);
-
-    const startedAt = Date.now();
-    const text = await runWhisperCli(binaryPath, modelPath, tmpFilePath);
-
-    return {
-      provider: "whisper-local",
-      model: settings.whisperModel,
-      text,
-      rawText: text,
-      durationMs,
-      transcriptionMs: Date.now() - startedAt,
-      usedFallback: false,
-      selectedProvider: "whisper-local",
-      fallbackProvider: null,
-      selectedProviderFailed: false,
-      failureMessage: null,
-    };
-  } finally {
-    // Clean up temp file
-    try {
-      fs.unlinkSync(tmpFilePath);
-    } catch {
-      // Ignore cleanup errors
-    }
-  }
+  return transcribeWithPreferredWhisperRuntime(durationMs, settings, {
+    ensureServerReady,
+    getServerStatus: getWhisperServerStatus,
+    logger: log,
+    modelPath,
+    safeMode: isSafeModeEnabled(),
+    transcribeWithCli: () => transcribeWithWhisperCliBuffer(buffer, binaryPath, modelPath),
+    transcribeWithServer: () => transcribeWithWhisperServer(buffer, settings),
+  });
 }
 
 export async function warmWhisperServer(settings: AppSettings) {
+  ensureManagedWhisperAssets();
   const modelPath = getWhisperModelPath(settings.whisperModel);
   await ensureServerReady(modelPath);
 }
 
 export async function transcribeWithWhisperServer(buffer: Buffer, settings: AppSettings, prompt?: string) {
-  await warmWhisperServer(settings);
-
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buffer)], { type: "audio/wav" }), "recording.wav");
   form.append("temperature", "0");
@@ -87,6 +67,23 @@ export async function transcribeWithWhisperServer(buffer: Buffer, settings: AppS
 
   const json = (await response.json()) as { text?: string };
   return json.text?.trim() ?? "";
+}
+
+async function transcribeWithWhisperCliBuffer(buffer: Buffer, binaryPath: string, modelPath: string) {
+  const tmpDir = getWhisperWorkingDirectory();
+  const tmpFileName = `craftvoice_${crypto.randomUUID()}.wav`;
+  const tmpFilePath = path.join(tmpDir, tmpFileName);
+
+  try {
+    fs.writeFileSync(tmpFilePath, buffer);
+    return await runWhisperCli(binaryPath, modelPath, tmpFilePath);
+  } finally {
+    try {
+      fs.unlinkSync(tmpFilePath);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 }
 
 function runWhisperCli(binaryPath: string, modelPath: string, audioPath: string): Promise<string> {
@@ -121,6 +118,7 @@ function runWhisperCli(binaryPath: string, modelPath: string, audioPath: string)
 }
 
 export function getWhisperHealth(settings: AppSettings): ProviderHealth {
+  ensureManagedWhisperAssets();
   const binaryPath = getWhisperExecutablePath();
   const modelPath = getWhisperModelPath(settings.whisperModel);
 

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { getDeliveryMode, getDeliveryModePatch } from "@shared/delivery-mode";
 import {
   getCloudPresetOptions,
   getPreferredModelPatch,
@@ -11,7 +10,6 @@ import {
 import { buildEffectiveProviderChain, formatProviderName } from "@shared/provider-order";
 import type {
   AppSettings,
-  DeliveryMode,
   LocalModelInfo,
   LocalModelProgress,
   ProviderHealth,
@@ -29,6 +27,7 @@ interface SettingsPageProps {
   localModels: LocalModelInfo[];
   onSave: (patch: Partial<AppSettings>) => Promise<void>;
   onTestProvider: (provider: ProviderId, draft?: Partial<AppSettings>) => Promise<ProviderTestResult>;
+  onOpenDiagnosticsFolder: () => Promise<void>;
   onInstallLocalModel: (modelId: string) => Promise<void>;
   onRemoveLocalModel: (modelId: string) => Promise<void>;
 }
@@ -50,6 +49,7 @@ export function SettingsPage({
   localModels,
   onSave,
   onTestProvider,
+  onOpenDiagnosticsFolder,
   onInstallLocalModel,
   onRemoveLocalModel,
 }: SettingsPageProps) {
@@ -118,7 +118,6 @@ export function SettingsPage({
   }, [draft.deepgramApiKey, draft.groqApiKey, draft.openaiApiKey, providerHealthMap]);
 
   const runtimeOrder = useMemo(() => buildEffectiveProviderChain(draft, availableProviders), [draft, availableProviders]);
-  const deliveryMode = useMemo(() => getDeliveryMode(draft), [draft.autoCopyClipboard, draft.autoPaste]);
   const selectedPrimaryReady =
     draft.defaultProvider === "whisper-local"
       ? Boolean(providerHealthMap["whisper-local"]?.available)
@@ -169,12 +168,6 @@ export function SettingsPage({
     updateDraft(nextKey, nextValue);
   }
 
-  function updateDeliveryMode(mode: DeliveryMode) {
-    const patch = getDeliveryModePatch(mode);
-    updateDraft("autoPaste", patch.autoPaste);
-    updateDraft("autoCopyClipboard", patch.autoCopyClipboard);
-  }
-
   async function handleSave() {
     setSaveFeedback({ state: "pending", message: "Saving..." });
 
@@ -222,6 +215,9 @@ export function SettingsPage({
           <p>Providers, input, clipboard, and fallback behavior.</p>
         </div>
         <div className="panel-actions">
+          <button className="ghost-button compact-button" disabled={saveFeedback.state === "pending"} onClick={() => void onOpenDiagnosticsFolder()}>
+            Open diagnostics
+          </button>
           {saveFeedback.message ? <div className={`inline-feedback feedback-${saveFeedback.state}`}>{saveFeedback.message}</div> : null}
           <button className="primary-button compact-button" disabled={saveFeedback.state === "pending"} onClick={() => void handleSave()}>
             {saveFeedback.state === "pending" ? "Saving..." : "Save"}
@@ -232,7 +228,7 @@ export function SettingsPage({
       <div className="summary-strip">
         <SummaryChip label="Preferred" value={formatProviderName(draft.defaultProvider)} />
         <SummaryChip label="Active now" value={activeProviderLabel} />
-        <SummaryChip label="Clipboard" value={deliveryMode === "copy" ? "Copy after stop" : "Paste + keep copied"} />
+        <SummaryChip label="Clipboard" value="Copy after stop" />
       </div>
 
       <div className="settings-line-list">
@@ -255,18 +251,15 @@ export function SettingsPage({
           </div>
         </SettingLine>
 
-        <SettingLine label="After stop" note="Clipboard-first with optional immediate paste.">
+        <SettingLine label="After stop" note="Clipboard-only during the stability reset. Paste is temporarily disabled.">
           <div className="settings-line-controls settings-line-controls-tight">
-            <label className="field compact-field">
-              <span>Mode</span>
-              <select value={deliveryMode} onChange={(event) => updateDeliveryMode(event.target.value as DeliveryMode)}>
-                <option value="copy">Copy to clipboard</option>
-                <option value="paste-and-copy">Paste + keep clipboard</option>
-              </select>
-            </label>
+            <div className="provider-inline-note provider-inline-note-compact">
+              <span>Clipboard</span>
+              <strong>Always copy after stop</strong>
+            </div>
             <CompactToggle
               label="Show widget"
-              hint="Floating control visible"
+              hint="Appears after startup is healthy. Safe mode hides it."
               checked={draft.showFloatingWidget}
               onChange={(checked) => updateDraft("showFloatingWidget", checked)}
             />

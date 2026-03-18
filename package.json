@@ -17,7 +17,7 @@
     "start": "node scripts/electron-launcher.mjs .",
     "package:dir": "npm run build && electron-builder --dir",
     "package:win": "npm run build && electron-builder --win nsis portable",
-    "test": "tsc -p tsconfig.test.json && node --test tmp/test-dist/main/transcribe/session-plan.test.js tmp/test-dist/main/transcribe/transcript-merge.test.js tmp/test-dist/main/transcribe/openai-realtime.test.js",
+    "test": "tsc -p tsconfig.test.json && node --test tmp/test-dist/main/startup.test.js tmp/test-dist/main/recording-workflow.test.js tmp/test-dist/main/db/settings-safety.test.js tmp/test-dist/main/transcribe/whisper-runtime.test.js tmp/test-dist/main/utils/file-logger.test.js",
     "typecheck": "tsc --noEmit",
     "postinstall": "electron-rebuild -f -w better-sqlite3,@nut-tree-fork/nut-js",
     "assets:download": "npm run whisper:download && npm run model:download",

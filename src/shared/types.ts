@@ -4,11 +4,10 @@ export type ProviderId = "whisper-local" | "openai" | "groq" | "deepgram";
 export type RemoteProviderId = Exclude<ProviderId, "whisper-local">;
 export type ProviderTier = "economy" | "best";
 export type DeliveryMode = "copy" | "paste-and-copy";
-export type RecordingAdapterKind = "whisper-rolling" | "openai-rolling" | "deepgram-live" | "groq-rolling" | "batch-upload";
-export type RecordingChunkTransport = "stream" | "rolling-window";
-export type RecordingChunkFormat = "wav" | "pcm16";
 export type LocalModelSource = "managed" | "bundled";
 export type LocalModelStage = "idle" | "downloading" | "installing" | "ready" | "error";
+export type StartupProfile = "normal" | "minimal" | "safe";
+export type StartupStage = "dom-ready" | "app-mounted" | "interactive";
 
 export interface WidgetPosition {
   x: number;
@@ -104,39 +103,7 @@ export interface TranscriptionResult {
 }
 
 export interface AudioSubmission {
-  audioBytes: Uint8Array;
-  durationMs: number;
-  sampleRate: number;
-}
-
-export interface RecordingSessionInfo {
-  sessionId: string;
-  selectedProvider: ProviderId;
-  activeProvider: ProviderId;
-  adapterKind: RecordingAdapterKind;
-  transport: RecordingChunkTransport;
-  captureSampleRate: number;
-  captureFormat: RecordingChunkFormat;
-  chunkIntervalMs: number;
-  rollingWindowMs: number;
-  overlapMs: number;
-  backupProviders: ProviderId[];
-  selectedProviderUnavailable: boolean;
-}
-
-export interface RecordingChunkSubmission {
-  sessionId: string;
-  chunkIndex: number;
-  startMs: number;
-  endMs: number;
-  sampleRate: number;
-  format: RecordingChunkFormat;
-  isFinalChunk: boolean;
-  audioBytes: Uint8Array;
-}
-
-export interface RecordingFinishSubmission {
-  sessionId: string;
+  recordingId: string;
   audioBytes: Uint8Array;
   durationMs: number;
   sampleRate: number;
@@ -205,6 +172,8 @@ export interface WhisperModelOption {
 export interface CraftVoiceApi {
   app: {
     getVersion: () => Promise<string>;
+    getStartupProfile: () => Promise<StartupProfile>;
+    reportStartupHeartbeat: (stage: StartupStage) => Promise<void>;
     showMainWindow: () => Promise<void>;
     minimizeToTray: () => Promise<void>;
     quit: () => Promise<void>;
@@ -213,9 +182,7 @@ export interface CraftVoiceApi {
   };
   recording: {
     toggle: () => Promise<RecordingState>;
-    beginSession: () => Promise<RecordingSessionInfo>;
-    submitChunk: (submission: RecordingChunkSubmission) => Promise<void>;
-    finishSession: (submission: RecordingFinishSubmission) => Promise<void>;
+    submitAudio: (submission: AudioSubmission) => Promise<void>;
     reportError: (message: string) => Promise<void>;
     publishLevel: (level: number) => void;
     onStateChange: (listener: (state: RecordingState) => void) => () => void;
@@ -223,7 +190,6 @@ export interface CraftVoiceApi {
     onCommand: (listener: (command: RecordingCommand) => void) => () => void;
     onResult: (listener: (result: TranscriptionResult) => void) => () => void;
     onError: (listener: (message: string) => void) => () => void;
-    onPartialTranscript: (listener: (text: string) => void) => () => void;
   };
   stats: {
     get: () => Promise<DashboardStats>;
@@ -255,21 +221,22 @@ export interface CraftVoiceApi {
     installLocalModel: (modelId: string) => Promise<void>;
     removeLocalModel: (modelId: string) => Promise<void>;
     testProvider: (provider: ProviderId, draft?: Partial<AppSettings>) => Promise<ProviderTestResult>;
+    openDiagnosticsFolder: () => Promise<void>;
     onLocalModelProgress: (listener: (progress: LocalModelProgress) => void) => () => void;
   };
 }
 
 export const IPC_CHANNELS = {
   appGetVersion: "app:get-version",
+  appGetStartupProfile: "app:get-startup-profile",
+  appStartupHeartbeat: "app:startup-heartbeat",
   appShowMainWindow: "app:show-main-window",
   appMinimizeToTray: "app:minimize-to-tray",
   appQuit: "app:quit",
   appOpenExternal: "app:open-external",
   appGetHotkeyStatus: "app:get-hotkey-status",
   recordingToggle: "recording:toggle",
-  recordingBeginSession: "recording:begin-session",
-  recordingSubmitChunk: "recording:submit-chunk",
-  recordingFinishSession: "recording:finish-session",
+  recordingSubmitAudio: "recording:submit-audio",
   recordingReportError: "recording:report-error",
   recordingPublishLevel: "recording:publish-level",
   recordingStateChanged: "recording:state-changed",
@@ -277,7 +244,6 @@ export const IPC_CHANNELS = {
   recordingCommand: "recording:command",
   recordingResult: "recording:result",
   recordingError: "recording:error",
-  recordingPartialTranscript: "recording:partial-transcript",
   statsGet: "stats:get",
   transcriptionsList: "transcriptions:list",
   transcriptionsDelete: "transcriptions:delete",
@@ -299,6 +265,7 @@ export const IPC_CHANNELS = {
   settingsInstallLocalModel: "settings:install-local-model",
   settingsRemoveLocalModel: "settings:remove-local-model",
   settingsTestProvider: "settings:test-provider",
+  settingsOpenDiagnosticsFolder: "settings:open-diagnostics-folder",
   settingsLocalModelProgress: "settings:local-model-progress",
   widgetSetMouseThrough: "widget:set-mouse-through",
 } as const;

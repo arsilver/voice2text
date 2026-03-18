@@ -8,7 +8,6 @@ export function WidgetApp() {
   const [state, setState] = useState<RecordingState>("idle");
   const [isToggling, setIsToggling] = useState(false);
   const [displayLevel, setDisplayLevel] = useState(0);
-  const [partialText, setPartialText] = useState("");
   const targetLevelRef = useRef(0);
   const lastLevelUpdateAtRef = useRef(0);
 
@@ -19,19 +18,16 @@ export function WidgetApp() {
         targetLevelRef.current = 0;
         lastLevelUpdateAtRef.current = 0;
         setDisplayLevel(0);
-        setPartialText("");
       }
     });
     const unsubscribeLevel = window.craftvoice.recording.onLevelChange((level) => {
       targetLevelRef.current = clamp01(level);
       lastLevelUpdateAtRef.current = performance.now();
     });
-    const unsubscribePartial = window.craftvoice.recording.onPartialTranscript(setPartialText);
 
     return () => {
       unsubscribeState();
       unsubscribeLevel();
-      unsubscribePartial();
     };
   }, []);
 
@@ -89,7 +85,7 @@ export function WidgetApp() {
       <div className={`widget-dot widget-${state}`} />
       <div className="widget-copy">
         <strong>CraftVoice</strong>
-        <span>{partialText && state === "recording" ? truncatePartial(partialText) : widgetLabel(state, isToggling)}</span>
+        <span>{widgetLabel(state, isToggling)}</span>
       </div>
       {state === "recording" ? (
         <div className="widget-meter" aria-hidden="true">
@@ -135,14 +131,6 @@ function buildMeterBars(level: number) {
 function smoothDisplayLevel(current: number, target: number) {
   const factor = target > current ? 0.36 : 0.16;
   return current + (target - current) * factor;
-}
-
-function truncatePartial(text: string) {
-  if (text.length <= 30) {
-    return text;
-  }
-
-  return `...${text.slice(-30)}`;
 }
 
 function clamp01(value: number) {

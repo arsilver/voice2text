@@ -1,6 +1,9 @@
 import { resolveCloudPresetTier, resolveProviderModelLabel } from "@shared/provider-presets";
 import type { AppSettings, ProviderId, ProviderTestResult, TranscriptionResult } from "@shared/types";
 
+const PROVIDER_REQUEST_TIMEOUT_MS = 120000;
+const PROVIDER_VALIDATION_TIMEOUT_MS = 15000;
+
 export async function transcribeWithOpenAi(buffer: Buffer, durationMs: number, settings: AppSettings): Promise<TranscriptionResult> {
   if (!settings.openaiApiKey) {
     throw new Error("Missing OpenAI API key.");
@@ -18,6 +21,7 @@ export async function transcribeWithOpenAi(buffer: Buffer, durationMs: number, s
       Authorization: `Bearer ${settings.openaiApiKey}`,
     },
     body: form,
+    signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -60,6 +64,7 @@ export async function transcribeWithGroq(buffer: Buffer, durationMs: number, set
       Authorization: `Bearer ${settings.groqApiKey}`,
     },
     body: form,
+    signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -99,6 +104,7 @@ export async function transcribeWithDeepgram(buffer: Buffer, durationMs: number,
       "Content-Type": "audio/wav",
     },
     body: bytes,
+    signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -146,6 +152,7 @@ async function validateOpenAi(settings: AppSettings): Promise<ProviderTestResult
     headers: {
       Authorization: `Bearer ${settings.openaiApiKey}`,
     },
+    signal: AbortSignal.timeout(PROVIDER_VALIDATION_TIMEOUT_MS),
   });
 
   if (response.ok) {
@@ -168,6 +175,7 @@ async function validateGroq(settings: AppSettings): Promise<ProviderTestResult> 
     headers: {
       Authorization: `Bearer ${settings.groqApiKey}`,
     },
+    signal: AbortSignal.timeout(PROVIDER_VALIDATION_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -199,6 +207,7 @@ async function validateDeepgram(settings: AppSettings): Promise<ProviderTestResu
     headers: {
       Authorization: `Token ${settings.deepgramApiKey}`,
     },
+    signal: AbortSignal.timeout(PROVIDER_VALIDATION_TIMEOUT_MS),
   });
 
   if (response.ok) {

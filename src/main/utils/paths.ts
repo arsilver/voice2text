@@ -33,13 +33,24 @@ export function getSessionDataDir() {
   return ensureDirectory(path.join(getUserDataDir(), "session-data"));
 }
 
+export function getDiagnosticsDir() {
+  return getUserDataDir();
+}
+
+export function getCrashDumpsDir() {
+  return ensureDirectory(path.join(getDiagnosticsDir(), "crash-dumps"));
+}
+
 export function configureAppPaths() {
   const userDataDir = getUserDataDir();
   const sessionDataDir = getSessionDataDir();
+  const crashDumpsDir = getCrashDumpsDir();
 
   app.setPath("sessionData", sessionDataDir);
+  app.setPath("crashDumps", crashDumpsDir);
 
   return {
+    crashDumpsDir,
     userDataDir,
     sessionDataDir,
   };
@@ -47,6 +58,10 @@ export function configureAppPaths() {
 
 export function getTempDir() {
   return ensureDirectory(path.join(getUserDataDir(), "tmp"));
+}
+
+export function getLogsDir() {
+  return ensureDirectory(path.join(getUserDataDir(), "logs"));
 }
 
 export function getDatabasePath() {

@@ -9,15 +9,55 @@ const log = getLogger("hotkeys");
 const { globalShortcut } = electronMain;
 
 let activeAccelerator = "";
+let hotkeysEnabled = true;
+let hotkeysDisabledReason = "";
 let hotkeyStatus: HotkeyStatus = {
   accelerator: "",
   registered: false,
   message: "No hotkey configured.",
 };
 
+export function configureHotkeyRegistration(options: { enabled: boolean; reason?: string }) {
+  hotkeysEnabled = options.enabled;
+  hotkeysDisabledReason = options.reason ?? "";
+  activeAccelerator = getSettings().hotkey;
+
+  if (!hotkeysEnabled) {
+    globalShortcut.unregisterAll();
+    hotkeyStatus = {
+      accelerator: activeAccelerator,
+      registered: false,
+      message: hotkeysDisabledReason || "Hotkeys are disabled for this launch.",
+    };
+    log.info("Hotkey registration disabled", {
+      accelerator: activeAccelerator,
+      reason: hotkeyStatus.message,
+    });
+  }
+
+  return hotkeyStatus;
+}
+
+export function isHotkeyRegistrationEnabled() {
+  return hotkeysEnabled;
+}
+
 export function registerHotkeys() {
   const settings = getSettings();
   activeAccelerator = settings.hotkey;
+
+  if (!hotkeysEnabled) {
+    hotkeyStatus = {
+      accelerator: activeAccelerator,
+      registered: false,
+      message: hotkeysDisabledReason || "Hotkeys are disabled for this launch.",
+    };
+    log.info("Skipping hotkey registration", {
+      accelerator: activeAccelerator,
+      reason: hotkeyStatus.message,
+    });
+    return hotkeyStatus;
+  }
 
   if (!activeAccelerator) {
     hotkeyStatus = {
@@ -66,6 +106,7 @@ export function getHotkeyStatus() {
 
 export async function toggleRecording(source: "hotkey" | "tray" | "widget" | "renderer") {
   const state = getRecordingState();
+  log.info("Toggle recording requested", { source, state });
 
   if (state === "idle" || state === "error") {
     setRecordingState("recording");

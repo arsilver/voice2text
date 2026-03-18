@@ -6,10 +6,15 @@ import { APP_NAME } from "@shared/constants";
 import { getLogger } from "@main/utils/logger";
 import { createAppIcon } from "@main/utils/icon";
 import { getPreloadPath, getRendererHtmlPath } from "@main/utils/paths";
+import type { StartupProfile } from "@shared/types";
 
 let mainWindow: Electron.BrowserWindow | null = null;
 let widgetWindow: Electron.BrowserWindow | null = null;
 let widgetGuardInterval: NodeJS.Timeout | null = null;
+let diagnosticsContext: {
+  launchId: string;
+  startupProfile: StartupProfile;
+} | null = null;
 const log = getLogger("windows");
 const { shell } = electron;
 const { BrowserWindow } = electronMain;
@@ -34,20 +39,83 @@ async function loadWindow(window: Electron.BrowserWindow, fileName: "index.html"
 }
 
 function attachWindowDiagnostics(window: Electron.BrowserWindow, label: "main" | "widget") {
+  const logLifecycle = (event: string, details?: Record<string, unknown>) => {
+    log.info("Window lifecycle", withDiagnosticsContext({
+      event,
+      window: label,
+      ...(details ?? {}),
+    }));
+  };
+
+  window.on("show", () => {
+    logLifecycle("show");
+  });
+
+  window.on("focus", () => {
+    logLifecycle("focus");
+  });
+
+  window.on("blur", () => {
+    logLifecycle("blur");
+  });
+
+  window.on("unresponsive", () => {
+    log.error("Window lifecycle", withDiagnosticsContext({ event: "unresponsive", window: label }));
+  });
+
+  window.on("responsive", () => {
+    logLifecycle("responsive");
+  });
+
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame) {
       return;
     }
 
-    log.error(`${label} window failed to load`, { errorCode, errorDescription, validatedURL });
+    log.error(`${label} window failed to load`, withDiagnosticsContext({ errorCode, errorDescription, validatedURL, window: label }));
   });
 
   window.webContents.on("render-process-gone", (_event, details) => {
-    log.error(`${label} renderer exited unexpectedly`, details);
+    log.error(`${label} renderer exited unexpectedly`, withDiagnosticsContext({ ...details, window: label }));
   });
 
   window.webContents.on("preload-error", (_event, preloadPath, error) => {
-    log.error(`${label} preload failed`, preloadPath, error);
+    log.error(`${label} preload failed`, withDiagnosticsContext({ preloadPath, window: label }), error);
+  });
+
+  window.webContents.on("dom-ready", () => {
+    logLifecycle("dom-ready");
+  });
+
+  window.webContents.on("did-finish-load", () => {
+    logLifecycle("did-finish-load");
+  });
+
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (!message.startsWith("[CraftVoice]") && level < 2) {
+      return;
+    }
+
+    const payload = {
+      ...withDiagnosticsContext(),
+      level: mapConsoleLevel(level),
+      line,
+      message,
+      sourceId,
+      window: label,
+    };
+
+    if (level >= 2) {
+      log.error("Renderer console", payload);
+      return;
+    }
+
+    if (level === 1) {
+      log.warn("Renderer console", payload);
+      return;
+    }
+
+    log.info("Renderer console", payload);
   });
 }
 
@@ -56,6 +124,7 @@ export async function createMainWindow() {
     return mainWindow;
   }
 
+  log.info("Creating main window", withDiagnosticsContext({ window: "main" }));
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -79,6 +148,7 @@ export async function createMainWindow() {
   });
 
   mainWindow.on("ready-to-show", () => {
+    log.info("Window lifecycle", withDiagnosticsContext({ event: "ready-to-show", window: "main" }));
     mainWindow?.show();
   });
 
@@ -127,6 +197,7 @@ export async function createWidgetWindow() {
     return widgetWindow;
   }
 
+  log.info("Creating widget window", withDiagnosticsContext({ window: "widget" }));
   widgetWindow = new BrowserWindow({
     width: 240,
     height: 72,
@@ -190,27 +261,49 @@ export function showMainWindow() {
 
   mainWindow.show();
   mainWindow.focus();
+  log.info("Main window shown", withDiagnosticsContext({ window: "main" }));
 }
 
 export function hideMainWindow() {
   mainWindow?.hide();
+  log.info("Main window hidden", withDiagnosticsContext({ window: "main" }));
 }
 
 export function setWidgetVisibility(visible: boolean) {
+  if (visible && !widgetWindow) {
+    void createWidgetWindow()
+      .then(() => {
+        if (widgetWindow) {
+          log.info("Widget visibility changed", withDiagnosticsContext({ visible: true, window: "widget" }));
+          pinWidgetWindow(true);
+        }
+      })
+      .catch((error) => {
+        log.error("Failed to create widget window", withDiagnosticsContext({ window: "widget" }), error);
+      });
+    return;
+  }
+
   if (!widgetWindow) {
     return;
   }
 
   if (visible) {
+    log.info("Widget visibility changed", withDiagnosticsContext({ visible: true, window: "widget" }));
     pinWidgetWindow(true);
   } else {
     widgetWindow.hide();
+    log.info("Widget visibility changed", withDiagnosticsContext({ visible: false, window: "widget" }));
   }
 }
 
 export function broadcast(channel: string, payload?: unknown) {
   mainWindow?.webContents.send(channel, payload);
   widgetWindow?.webContents.send(channel, payload);
+}
+
+export function setWindowDiagnosticsContext(context: { launchId: string; startupProfile: StartupProfile }) {
+  diagnosticsContext = context;
 }
 
 function pinWidgetWindow(ensureVisible: boolean) {
@@ -248,4 +341,29 @@ function stopWidgetGuard() {
 
   clearInterval(widgetGuardInterval);
   widgetGuardInterval = null;
+}
+
+function mapConsoleLevel(level: number) {
+  switch (level) {
+    case 3:
+      return "error";
+    case 2:
+      return "warn";
+    case 1:
+      return "info";
+    default:
+      return "debug";
+  }
+}
+
+function withDiagnosticsContext(payload?: Record<string, unknown>) {
+  if (!diagnosticsContext) {
+    return payload ?? {};
+  }
+
+  return {
+    launchId: diagnosticsContext.launchId,
+    startupProfile: diagnosticsContext.startupProfile,
+    ...(payload ?? {}),
+  };
 }

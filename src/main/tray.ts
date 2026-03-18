@@ -1,11 +1,13 @@
 import electronMain from "electron/main";
 
 import { createAppIcon } from "@main/utils/icon";
-import { getWidgetWindow, setWidgetVisibility, showMainWindow } from "@main/windows";
+import { setWidgetVisibility, showMainWindow } from "@main/windows";
 import { getSettings, saveSettings } from "@main/db/settings";
 import { toggleRecording } from "@main/hotkeys";
+import { getLogger } from "@main/utils/logger";
 
 let tray: Electron.Tray | null = null;
+const log = getLogger("tray");
 const { Menu, Tray, app } = electronMain;
 
 export function createTray() {
@@ -13,6 +15,7 @@ export function createTray() {
     return tray;
   }
 
+  log.info("Creating tray");
   tray = new Tray(createAppIcon().resize({ width: 16, height: 16 }));
   tray.setToolTip("CraftVoice");
   rebuildTrayMenu();
@@ -21,13 +24,17 @@ export function createTray() {
   return tray;
 }
 
+export function hasTray() {
+  return tray !== null;
+}
+
 /** Rebuild the tray context menu (call after widget visibility changes). */
 export function rebuildTrayMenu() {
   if (!tray) {
     return;
   }
 
-  const widgetVisible = getWidgetWindow()?.isVisible() ?? false;
+  const widgetEnabled = getSettings().showFloatingWidget;
 
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -35,9 +42,9 @@ export function rebuildTrayMenu() {
       { label: "Toggle Recording", click: () => void toggleRecording("tray") },
       { type: "separator" },
       {
-        label: widgetVisible ? "Hide Widget" : "Show Widget",
+        label: widgetEnabled ? "Hide Widget" : "Show Widget",
         click: () => {
-          const next = !widgetVisible;
+          const next = !widgetEnabled;
           setWidgetVisibility(next);
           saveSettings({ showFloatingWidget: next });
           rebuildTrayMenu(); // refresh label

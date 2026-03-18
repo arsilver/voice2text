@@ -6,9 +6,23 @@ import { DEFAULT_SETTINGS, SECRET_SETTING_KEYS } from "@shared/constants";
 import { normalizeFallbackOrder } from "@shared/provider-order";
 import { LOCAL_WHISPER_PRESETS, prettifyLocalWhisperModel, resolveProviderModelLabel } from "@shared/provider-presets";
 import type { AppSettings, ProviderHealth, ProviderId, WhisperModelOption } from "@shared/types";
+import { getLogger } from "@main/utils/logger";
 import { getWhisperExecutablePath, getWhisperModelPath, getWhisperModelsDir } from "@main/utils/paths";
+import { isSafeModeEnabled } from "@main/utils/runtime-flags";
+import {
+  applyRuntimeSafetyOverrides,
+  buildStabilityResetMigrationPatch,
+  buildWidgetRestoreMigrationPatch,
+  coerceUnsafeSettingsPatch,
+  isBooleanSettingsKey,
+  isJsonSettingsKey,
+  isKnownSettingsKey,
+  STABILITY_RESET_SETTING_KEY,
+  WIDGET_RESTORE_SETTING_KEY,
+} from "./settings-safety";
 
 const { safeStorage } = electronMain;
+const log = getLogger("settings");
 
 export function getSettings(): AppSettings {
   const db = getDb();
@@ -16,14 +30,16 @@ export function getSettings(): AppSettings {
   const current = { ...DEFAULT_SETTINGS };
 
   for (const row of rows) {
-    const key = row.key as keyof AppSettings;
+    if (!isKnownSettingsKey(row.key)) {
+      continue;
+    }
+
+    const key = row.key;
     const value = row.is_secret ? decryptValue(row.value) : row.value;
 
-    if (key === "fallbackEnabled" || key === "autoPaste" || key === "autoCopyClipboard" || key === "playSounds" || key === "aiTextPolish" || key === "showFloatingWidget") {
+    if (isBooleanSettingsKey(key)) {
       current[key] = (value === "true") as never;
-    } else if (key === "fallbackOrder") {
-      current[key] = JSON.parse(value) as never;
-    } else if (key === "widgetPosition") {
+    } else if (isJsonSettingsKey(key)) {
       current[key] = JSON.parse(value) as never;
     } else {
       current[key] = value as never;
@@ -31,12 +47,12 @@ export function getSettings(): AppSettings {
   }
 
   current.fallbackOrder = normalizeFallbackOrder(current.fallbackOrder);
-  return current;
+  return applyRuntimeSafetyOverrides(current, isSafeModeEnabled());
 }
 
 export function saveSettings(patch: Partial<AppSettings>) {
   const db = getDb();
-  const normalizedPatch = { ...patch };
+  const normalizedPatch = coerceUnsafeSettingsPatch({ ...patch });
 
   if (normalizedPatch.fallbackOrder) {
     normalizedPatch.fallbackOrder = normalizeFallbackOrder(normalizedPatch.fallbackOrder);
@@ -56,6 +72,101 @@ export function saveSettings(patch: Partial<AppSettings>) {
 
   transaction(normalizedPatch);
   return getSettings();
+}
+
+export function applyStabilityResetMigration() {
+  const db = getDb();
+  const existing = db.prepare("SELECT value FROM settings WHERE key = ?").get(STABILITY_RESET_SETTING_KEY) as { value: string } | undefined;
+
+  if (existing?.value === "true") {
+    return;
+  }
+
+  const settingsRowCount = (
+    db.prepare(
+      `SELECT COUNT(*) as count
+       FROM settings
+       WHERE key NOT IN (?, ?)`
+    ).get(STABILITY_RESET_SETTING_KEY, WIDGET_RESTORE_SETTING_KEY) as { count: number }
+  ).count;
+
+  if (settingsRowCount === 0) {
+    const transaction = db.transaction(() => {
+      db.prepare(
+        `INSERT INTO settings (key, value, is_secret)
+         VALUES (?, ?, 0)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = 0`
+      ).run(STABILITY_RESET_SETTING_KEY, "true");
+      db.prepare(
+        `INSERT INTO settings (key, value, is_secret)
+         VALUES (?, ?, 0)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = 0`
+      ).run(WIDGET_RESTORE_SETTING_KEY, "true");
+    });
+
+    transaction();
+    log.info("Skipped stability reset patch for fresh install");
+    return;
+  }
+
+  const migrationPatch = buildStabilityResetMigrationPatch();
+  const transaction = db.transaction(() => {
+    for (const [key, rawValue] of Object.entries(migrationPatch) as [keyof AppSettings, AppSettings[keyof AppSettings]][]) {
+      const isSecret = SECRET_SETTING_KEYS.has(key);
+      const value = serializeValue(rawValue);
+      db.prepare(
+        `INSERT INTO settings (key, value, is_secret)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = excluded.is_secret`
+      ).run(key, isSecret ? encryptValue(value) : value, isSecret ? 1 : 0);
+    }
+
+    db.prepare(
+      `INSERT INTO settings (key, value, is_secret)
+       VALUES (?, ?, 0)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = 0`
+    ).run(STABILITY_RESET_SETTING_KEY, "true");
+  });
+
+  transaction();
+  log.info("Applied stability reset migration", migrationPatch);
+}
+
+export function applyWidgetRestoreMigration() {
+  const db = getDb();
+  const existing = db.prepare("SELECT value FROM settings WHERE key = ?").get(WIDGET_RESTORE_SETTING_KEY) as { value: string } | undefined;
+
+  if (existing?.value === "true") {
+    return;
+  }
+
+  const stabilityResetApplied = db.prepare("SELECT value FROM settings WHERE key = ?").get(STABILITY_RESET_SETTING_KEY) as { value: string } | undefined;
+
+  if (stabilityResetApplied?.value !== "true") {
+    return;
+  }
+
+  const migrationPatch = buildWidgetRestoreMigrationPatch();
+  const transaction = db.transaction(() => {
+    for (const [key, rawValue] of Object.entries(migrationPatch) as [keyof AppSettings, AppSettings[keyof AppSettings]][]) {
+      const isSecret = SECRET_SETTING_KEYS.has(key);
+      const value = serializeValue(rawValue);
+      db.prepare(
+        `INSERT INTO settings (key, value, is_secret)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = excluded.is_secret`
+      ).run(key, isSecret ? encryptValue(value) : value, isSecret ? 1 : 0);
+    }
+
+    db.prepare(
+      `INSERT INTO settings (key, value, is_secret)
+       VALUES (?, ?, 0)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = 0`
+    ).run(WIDGET_RESTORE_SETTING_KEY, "true");
+  });
+
+  transaction();
+  log.info("Applied widget restore migration", migrationPatch);
 }
 
 export function getProviderHealth(inputSettings = getSettings()): ProviderHealth[] {

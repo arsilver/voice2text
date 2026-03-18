@@ -9,6 +9,7 @@ import { OverviewPage } from "@renderer/pages/OverviewPage";
 import { PromptsPage } from "@renderer/pages/PromptsPage";
 import { SettingsPage } from "@renderer/pages/SettingsPage";
 import { ShortcutsPage } from "@renderer/pages/ShortcutsPage";
+import { reportStartupStageOnce } from "@renderer/startup-heartbeat";
 import { DEFAULT_SETTINGS } from "@shared/constants";
 import { formatProviderName } from "@shared/provider-order";
 import type {
@@ -62,23 +63,19 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "warning" | "error"; message: string } | null>(null);
   const [headerAction, setHeaderAction] = useState<"idle" | "toggling" | "minimizing">("idle");
-  const [partialTranscript, setPartialTranscript] = useState("");
   const noticeTimeoutRef = useRef<number | null>(null);
   const location = useLocation();
 
   const HISTORY_PAGE_SIZE = 50;
 
   const refreshData = useEffectEvent(async () => {
-    const [nextStats, nextHistory, nextDictionary, nextPrompts, nextSettings, nextHealth, nextWhisperModels, nextLocalModels, nextHotkeyStatus] =
-      await Promise.all([
+    const [nextStats, nextHistory, nextDictionary, nextPrompts, nextSettings, nextHealth, nextHotkeyStatus] = await Promise.all([
       window.craftvoice.stats.get(),
       window.craftvoice.transcriptions.list(HISTORY_PAGE_SIZE),
       window.craftvoice.dictionary.list(),
       window.craftvoice.prompts.list(),
       window.craftvoice.settings.get(),
       window.craftvoice.settings.providerHealth(),
-      window.craftvoice.settings.whisperModels(),
-      window.craftvoice.settings.localModels(),
       window.craftvoice.app.getHotkeyStatus(),
     ]);
 
@@ -89,9 +86,15 @@ export function App() {
     setPrompts(nextPrompts);
     setSettings(nextSettings);
     setProviderHealth(nextHealth);
-    setWhisperModels(nextWhisperModels);
-    setLocalModels(nextLocalModels);
     setHotkeyStatus(nextHotkeyStatus);
+
+    if (location.pathname === "/settings") {
+      const nextLocalModels = await window.craftvoice.settings.localModels();
+      const nextWhisperModels = await window.craftvoice.settings.whisperModels();
+
+      setLocalModels(nextLocalModels);
+      setWhisperModels(nextWhisperModels);
+    }
   });
 
   const showNotice = useEffectEvent((message: string, tone: "success" | "warning" | "error" = "success", durationMs = 2600) => {
@@ -108,25 +111,22 @@ export function App() {
 
   const handleRecordingResult = useEffectEvent((result: TranscriptionResult) => {
     setErrorMessage("");
-    setPartialTranscript("");
     showNotice(getRecordingNotice(result, settings), getRecordingNoticeTone(result, settings));
     void refreshData();
   });
 
   const handleRecordingError = useEffectEvent((message: string) => {
     setErrorMessage(message);
-    setPartialTranscript("");
     setNotice(null);
     void refreshData();
   });
 
   useEffect(() => {
-    void refreshData();
-
+    // Effect events are intentionally omitted from deps here; we want a single
+    // subscription lifecycle for the renderer process, not a re-subscribe loop.
     const unsubscribeState = window.craftvoice.recording.onStateChange(setRecordingState);
     const unsubscribeResult = window.craftvoice.recording.onResult(handleRecordingResult);
     const unsubscribeError = window.craftvoice.recording.onError(handleRecordingError);
-    const unsubscribePartial = window.craftvoice.recording.onPartialTranscript(setPartialTranscript);
 
     return () => {
       if (noticeTimeoutRef.current) {
@@ -135,9 +135,28 @@ export function App() {
       unsubscribeState();
       unsubscribeResult();
       unsubscribeError();
-      unsubscribePartial();
     };
-  }, [handleRecordingError, handleRecordingResult, refreshData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Refresh on first mount and when the route changes, but do not couple this
+    // to the startup heartbeat effect or every re-render.
+    void refreshData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  useEffect(() => {
+    reportStartupStageOnce("app-mounted");
+
+    const interactiveTimer = window.setTimeout(() => {
+      reportStartupStageOnce("interactive");
+    }, 250);
+
+    return () => {
+      window.clearTimeout(interactiveTimer);
+    };
+  }, []);
 
   async function savePatch(patch: Partial<AppSettings>) {
     const nextSettings = await window.craftvoice.settings.save(patch);
@@ -195,10 +214,7 @@ export function App() {
             <span className="toolbar-route-label">{routeLabel}</span>
           </div>
           <div className="toolbar-actions">
-            {partialTranscript && recordingState === "recording" ? (
-              <div className="toolbar-notice toolbar-notice-success">{partialTranscript.length > 60 ? `...${partialTranscript.slice(-60)}` : partialTranscript}</div>
-            ) : null}
-            {notice && !partialTranscript ? <div className={`toolbar-notice toolbar-notice-${notice.tone}`}>{notice.message}</div> : null}
+            {notice ? <div className={`toolbar-notice toolbar-notice-${notice.tone}`}>{notice.message}</div> : null}
             {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
             <button
               className={`ghost-button compact-button toolbar-record-button${recordingState === "recording" ? " toolbar-record-button-active" : ""}`}
@@ -255,7 +271,7 @@ export function App() {
                 }}
                 onReinsert={async (id) => {
                   const inserted = await window.craftvoice.transcriptions.reinsert(id);
-                  showNotice(inserted ? "Transcript sent again." : "Transcript is no longer available.", inserted ? "success" : "error", 1800);
+                  showNotice(inserted ? "Transcript copied again." : "Transcript is no longer available.", inserted ? "success" : "error", 1800);
                 }}
                 onLoadMore={async () => {
                   const more = await window.craftvoice.transcriptions.list(HISTORY_PAGE_SIZE, history.length);
@@ -292,6 +308,7 @@ export function App() {
                 localModels={localModels}
                 onSave={savePatch}
                 onTestProvider={(provider: ProviderId, draft?: Partial<AppSettings>) => window.craftvoice.settings.testProvider(provider, draft)}
+                onOpenDiagnosticsFolder={() => window.craftvoice.settings.openDiagnosticsFolder()}
                 onInstallLocalModel={async (modelId) => {
                   await window.craftvoice.settings.installLocalModel(modelId);
                   await refreshData();
@@ -309,37 +326,21 @@ export function App() {
   );
 }
 
-function getRecordingNotice(result: TranscriptionResult, settings: AppSettings) {
+function getRecordingNotice(result: TranscriptionResult, _settings: AppSettings) {
   const providerLabel = formatProviderName(result.provider);
 
   if (result.usedFallback) {
     const selectedLabel = formatProviderName(result.selectedProvider);
     const reasonText = result.failureMessage ? ` ${result.failureMessage}` : ` ${selectedLabel} could not complete this pass.`;
 
-    if (result.wasPasted) {
-      return `${providerLabel} backup pasted the result.${reasonText}`;
-    }
-
-    if (settings.autoPaste) {
-      return `${providerLabel} backup handled this pass.${reasonText} Paste missed, but the text is copied.`;
-    }
-
     return `${providerLabel} backup handled this pass.${reasonText} Text copied to clipboard.`;
-  }
-
-  if (result.wasPasted) {
-    return "Pasted and kept in clipboard.";
-  }
-
-  if (settings.autoPaste) {
-    return "Paste missed. Text is still copied to clipboard.";
   }
 
   return "Copied to clipboard.";
 }
 
-function getRecordingNoticeTone(result: TranscriptionResult, settings: AppSettings) {
-  if (result.usedFallback || (settings.autoPaste && !result.wasPasted)) {
+function getRecordingNoticeTone(result: TranscriptionResult, _settings: AppSettings) {
+  if (result.usedFallback) {
     return "warning" as const;
   }
 

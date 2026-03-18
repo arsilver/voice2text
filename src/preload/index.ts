@@ -2,10 +2,9 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import {
   IPC_CHANNELS,
+  type AudioSubmission,
   type CraftVoiceApi,
   type ProviderId,
-  type RecordingChunkSubmission,
-  type RecordingFinishSubmission,
   type SaveDictionaryInput,
   type SavePromptCardInput,
 } from "@shared/types";
@@ -13,6 +12,8 @@ import {
 const api: CraftVoiceApi = {
   app: {
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion),
+    getStartupProfile: () => ipcRenderer.invoke(IPC_CHANNELS.appGetStartupProfile),
+    reportStartupHeartbeat: (stage) => ipcRenderer.invoke(IPC_CHANNELS.appStartupHeartbeat, stage),
     showMainWindow: () => ipcRenderer.invoke(IPC_CHANNELS.appShowMainWindow),
     minimizeToTray: () => ipcRenderer.invoke(IPC_CHANNELS.appMinimizeToTray),
     quit: () => ipcRenderer.invoke(IPC_CHANNELS.appQuit),
@@ -21,9 +22,7 @@ const api: CraftVoiceApi = {
   },
   recording: {
     toggle: () => ipcRenderer.invoke(IPC_CHANNELS.recordingToggle),
-    beginSession: () => ipcRenderer.invoke(IPC_CHANNELS.recordingBeginSession),
-    submitChunk: (submission: RecordingChunkSubmission) => ipcRenderer.invoke(IPC_CHANNELS.recordingSubmitChunk, submission),
-    finishSession: (submission: RecordingFinishSubmission) => ipcRenderer.invoke(IPC_CHANNELS.recordingFinishSession, submission),
+    submitAudio: (submission: AudioSubmission) => ipcRenderer.invoke(IPC_CHANNELS.recordingSubmitAudio, submission),
     reportError: (message: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingReportError, message),
     publishLevel: (level: number) => ipcRenderer.send(IPC_CHANNELS.recordingPublishLevel, level),
     onStateChange: (listener) => subscribe(IPC_CHANNELS.recordingStateChanged, listener),
@@ -31,7 +30,6 @@ const api: CraftVoiceApi = {
     onCommand: (listener) => subscribe(IPC_CHANNELS.recordingCommand, listener),
     onResult: (listener) => subscribe(IPC_CHANNELS.recordingResult, listener),
     onError: (listener) => subscribe(IPC_CHANNELS.recordingError, listener),
-    onPartialTranscript: (listener) => subscribe(IPC_CHANNELS.recordingPartialTranscript, listener),
   },
   stats: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.statsGet),
@@ -63,6 +61,7 @@ const api: CraftVoiceApi = {
     installLocalModel: (modelId: string) => ipcRenderer.invoke(IPC_CHANNELS.settingsInstallLocalModel, modelId),
     removeLocalModel: (modelId: string) => ipcRenderer.invoke(IPC_CHANNELS.settingsRemoveLocalModel, modelId),
     testProvider: (provider: ProviderId, draft) => ipcRenderer.invoke(IPC_CHANNELS.settingsTestProvider, provider, draft),
+    openDiagnosticsFolder: () => ipcRenderer.invoke(IPC_CHANNELS.settingsOpenDiagnosticsFolder),
     onLocalModelProgress: (listener) => subscribe(IPC_CHANNELS.settingsLocalModelProgress, listener),
   },
 };

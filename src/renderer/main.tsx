@@ -4,6 +4,9 @@ import { HashRouter } from "react-router-dom";
 
 import { App } from "./App";
 import "./globals.css";
+import { reportStartupStageOnce } from "./startup-heartbeat";
+
+reportStartupStageOnce("dom-ready");
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -12,4 +15,3 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     </HashRouter>
   </React.StrictMode>
 );
-

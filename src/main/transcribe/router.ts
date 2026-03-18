@@ -1,25 +1,25 @@
 import { getSettings } from "@main/db/settings";
+import { getLogger } from "@main/utils/logger";
 import { normalizeFallbackOrder } from "@shared/provider-order";
 import type { AppSettings, ProviderId, ProviderTestResult, TranscriptionResult } from "@shared/types";
-import { getLogger } from "@main/utils/logger";
 
 import { transcribeWithDeepgram, testRemoteProvider, transcribeWithGroq, transcribeWithOpenAi } from "./providers";
-import {
-  resolveSessionTranscriptionPlan,
-  type FrozenTranscriptionPlan,
-  type ProviderAvailabilitySnapshot,
-} from "./session-plan";
 import { getWhisperHealth, transcribeWithWhisper } from "./whisper-local";
 
 const log = getLogger("router");
 
-export async function transcribeAudio(buffer: Buffer, durationMs: number) {
-  const settings = getSettings();
-  const plan = getFrozenTranscriptionPlan(settings);
+export async function transcribeAudio(buffer: Buffer, durationMs: number, settings = getSettings()) {
+  const availability = getProviderAvailability(settings);
+  const providerChain = buildProviderChain(settings, availability);
+  const failureMessage =
+    providerChain.length > 0 && providerChain[0] !== settings.defaultProvider
+      ? `${settings.defaultProvider} is not ready. ${providerChain[0]} backup will be used for this recording.`
+      : null;
+
   return transcribeAudioWithPlan(buffer, durationMs, settings, {
-    selectedProvider: plan.selectedProvider,
-    providerChain: [plan.selectedProvider, ...plan.backupProviders].filter((provider, index, providers) => providers.indexOf(provider) === index),
-    failureMessage: null,
+    failureMessage,
+    providerChain,
+    selectedProvider: settings.defaultProvider,
   });
 }
 
@@ -46,6 +46,7 @@ export async function transcribeAudioWithPlan(
     try {
       const result = await runProvider(provider, buffer, durationMs, settings);
       const isFallback = provider !== plan.selectedProvider || index > 0;
+
       return {
         ...result,
         selectedProvider: plan.selectedProvider,
@@ -64,9 +65,27 @@ export async function transcribeAudioWithPlan(
   throw lastError ?? new Error("No transcription providers available.");
 }
 
-export function getFrozenTranscriptionPlan(settings = getSettings()) {
-  const availability = getProviderAvailability(settings);
-  const plan = resolveSessionTranscriptionPlan(settings, availability);
+export function buildProviderChain(settings = getSettings(), availability = getProviderAvailability(settings)) {
+  const selectedProvider = settings.defaultProvider;
+  const providerChain: ProviderId[] = [];
+
+  if (availability[selectedProvider]) {
+    providerChain.push(selectedProvider);
+  }
+
+  if (settings.fallbackEnabled) {
+    for (const provider of normalizeFallbackOrder(settings.fallbackOrder)) {
+      if (provider === selectedProvider || !availability[provider] || providerChain.includes(provider)) {
+        continue;
+      }
+
+      providerChain.push(provider);
+    }
+
+    if (selectedProvider !== "whisper-local" && availability["whisper-local"] && !providerChain.includes("whisper-local")) {
+      providerChain.push("whisper-local");
+    }
+  }
 
   for (const [provider, available] of Object.entries(availability) as Array<[ProviderId, boolean]>) {
     if (!available) {
@@ -74,10 +93,10 @@ export function getFrozenTranscriptionPlan(settings = getSettings()) {
     }
   }
 
-  return plan;
+  return providerChain;
 }
 
-export function getProviderAvailability(settings: AppSettings): ProviderAvailabilitySnapshot {
+export function getProviderAvailability(settings: AppSettings): Record<ProviderId, boolean> {
   return {
     "whisper-local": getWhisperHealth(settings).available,
     openai: Boolean(settings.openaiApiKey),
