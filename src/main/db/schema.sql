@@ -37,3 +37,16 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE INDEX IF NOT EXISTS idx_transcriptions_created_at ON transcriptions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dictionary_original ON dictionary_entries(original_text);
 CREATE INDEX IF NOT EXISTS idx_prompt_cards_updated_at ON prompt_cards(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS improved_prompts (
+  id TEXT PRIMARY KEY,
+  transcription_id TEXT,
+  created_at TEXT NOT NULL,
+  raw_input TEXT NOT NULL,
+  improved_text TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'general',
+  duration_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_improved_prompts_created_at ON improved_prompts(created_at DESC);

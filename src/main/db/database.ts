@@ -11,9 +11,19 @@ export function getDb() {
     database.pragma("journal_mode = WAL");
     database.pragma("foreign_keys = ON");
     database.exec(schemaSql);
+    runMigrations(database);
   }
 
   return database;
+}
+
+function runMigrations(db: Database.Database) {
+  // Add category column to improved_prompts if it doesn't exist yet.
+  const columns = db.pragma("table_info(improved_prompts)") as { name: string }[];
+  const hasCategory = columns.some((c) => c.name === "category");
+  if (!hasCategory) {
+    db.prepare("ALTER TABLE improved_prompts ADD COLUMN category TEXT NOT NULL DEFAULT 'general'").run();
+  }
 }
 
 export function closeDb() {

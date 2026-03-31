@@ -88,11 +88,35 @@ export function OverviewPage({ stats, recordingState, providerHealth, hotkeyStat
         />
       </div>
 
-      <div className="metric-strip">
-        <MetricCell label="Words" value={String(stats.totalWords)} hint="transcribed" />
-        <MetricCell label="Speaking" value={`${Math.round(stats.speakingTimeMs / 1000)}s`} hint="captured" />
-        <MetricCell label="Sessions" value={String(stats.sessions)} hint="stored" />
-        <MetricCell label="Avg pace" value={`${stats.averagePace} wpm`} hint="speech rate" />
+      <div className="overview-stats-grid">
+        <StatCard
+          label="Words transcribed"
+          value={stats.totalWords}
+          max={10000}
+          color="var(--accent)"
+          detail={`${stats.totalWords.toLocaleString()} total`}
+        />
+        <StatCard
+          label="Speaking time"
+          value={Math.round(stats.speakingTimeMs / 1000)}
+          max={7200}
+          color="var(--accent-blue)"
+          detail={formatDuration(stats.speakingTimeMs)}
+        />
+        <StatCard
+          label="Sessions"
+          value={stats.sessions}
+          max={200}
+          color="var(--success)"
+          detail={`${stats.sessions} recorded`}
+        />
+        <StatCard
+          label="Avg pace"
+          value={stats.averagePace}
+          max={200}
+          color="var(--warning)"
+          detail={`${stats.averagePace} words/min`}
+        />
       </div>
 
       <div className="section-divider" />
@@ -142,14 +166,40 @@ function HealthChip({
   );
 }
 
-function MetricCell({ label, value, hint }: { label: string; value: string; hint: string }) {
+function StatCard({
+  label,
+  value,
+  max,
+  color,
+  detail,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  color: string;
+  detail: string;
+}) {
+  const pct = Math.min((value / max) * 100, 100);
   return (
-    <article className="metric-cell">
+    <article className="stat-card">
       <span className="stat-label">{label}</span>
-      <strong className="metric-value">{value}</strong>
-      <span className="metric-hint">{hint}</span>
+      <strong className="stat-card-value">{value.toLocaleString()}</strong>
+      <div className="stat-bar-track">
+        <div className="stat-bar-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <span className="stat-card-detail">{detail}</span>
     </article>
   );
+}
+
+function formatDuration(ms: number): string {
+  const totalSec = Math.round(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 function mapMicrophoneState(state: PermissionState): MicrophonePermissionState {

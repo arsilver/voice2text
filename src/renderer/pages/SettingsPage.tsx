@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { SECRET_SETTING_KEY_LIST } from "@shared/settings-secrets";
 import {
   getCloudPresetOptions,
   getPreferredModelPatch,
@@ -17,6 +18,8 @@ import type {
   ProviderPresetOption,
   ProviderTestResult,
   RemoteProviderId,
+  SecretSettingKey,
+  SettingsSaveInput,
   WhisperModelOption,
 } from "@shared/types";
 
@@ -25,8 +28,8 @@ interface SettingsPageProps {
   providerHealth: ProviderHealth[];
   whisperModels: WhisperModelOption[];
   localModels: LocalModelInfo[];
-  onSave: (patch: Partial<AppSettings>) => Promise<void>;
-  onTestProvider: (provider: ProviderId, draft?: Partial<AppSettings>) => Promise<ProviderTestResult>;
+  onSave: (input: Partial<AppSettings> | SettingsSaveInput) => Promise<void>;
+  onTestProvider: (provider: ProviderId, draft?: Partial<AppSettings> | SettingsSaveInput) => Promise<ProviderTestResult>;
   onOpenDiagnosticsFolder: () => Promise<void>;
   onInstallLocalModel: (modelId: string) => Promise<void>;
   onRemoveLocalModel: (modelId: string) => Promise<void>;
@@ -58,19 +61,27 @@ export function SettingsPage({
   const [saveFeedback, setSaveFeedback] = useState<AsyncFeedback>({ state: "idle", message: "" });
   const [validationFeedback, setValidationFeedback] = useState<Partial<Record<ProviderId, AsyncFeedback>>>({});
   const [localModelFeedback, setLocalModelFeedback] = useState<Partial<Record<string, LocalModelProgress>>>({});
+  const [clearedSecrets, setClearedSecrets] = useState<Partial<Record<SecretSettingKey, boolean>>>({});
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const saveRequestIdRef = useRef(0);
 
   // Refs so the unmount cleanup sees the latest values (not stale closures)
   const draftRef = useRef(draft);
   const isDirtyRef = useRef(isDirty);
+  const clearedSecretsRef = useRef(clearedSecrets);
   draftRef.current = draft;
   isDirtyRef.current = isDirty;
+  clearedSecretsRef.current = clearedSecrets;
 
   // Auto-save when leaving the Settings page (component unmount).
   // This ensures settings persist even if the user forgets to click Save.
   useEffect(() => {
     return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
       if (isDirtyRef.current) {
-        void onSave(draftRef.current);
+        void persistDraft(draftRef.current, clearedSecretsRef.current, { showFeedback: false });
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -82,6 +93,7 @@ export function SettingsPage({
   useEffect(() => {
     if (!isDirty) {
       setDraft(settings);
+      setClearedSecrets({});
       setValidationFeedback({});
     }
   }, [settings, isDirty]);
@@ -92,6 +104,32 @@ export function SettingsPage({
       [progress.modelId]: progress,
     }));
   }), []);
+
+  useEffect(() => {
+    if (!isDirty) {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void persistDraft(draftRef.current, clearedSecretsRef.current, { showFeedback: false });
+    }, 550);
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    };
+  }, [draft, isDirty]);
 
   const providerHealthMap = useMemo(
     () => Object.fromEntries(providerHealth.map((item) => [item.provider, item])) as Partial<Record<ProviderId, ProviderHealth>>,
@@ -104,18 +142,18 @@ export function SettingsPage({
     if (providerHealthMap["whisper-local"]?.available) {
       ready.push("whisper-local");
     }
-    if (draft.openaiApiKey.trim()) {
+    if (hasConfiguredRemoteKey("openai", draft, providerHealthMap, clearedSecrets)) {
       ready.push("openai");
     }
-    if (draft.groqApiKey.trim()) {
+    if (hasConfiguredRemoteKey("groq", draft, providerHealthMap, clearedSecrets)) {
       ready.push("groq");
     }
-    if (draft.deepgramApiKey.trim()) {
+    if (hasConfiguredRemoteKey("deepgram", draft, providerHealthMap, clearedSecrets)) {
       ready.push("deepgram");
     }
 
     return ready;
-  }, [draft.deepgramApiKey, draft.groqApiKey, draft.openaiApiKey, providerHealthMap]);
+  }, [clearedSecrets, draft.deepgramApiKey, draft.groqApiKey, draft.openaiApiKey, providerHealthMap]);
 
   const runtimeOrder = useMemo(() => buildEffectiveProviderChain(draft, availableProviders), [draft, availableProviders]);
   const selectedPrimaryReady =
@@ -137,6 +175,14 @@ export function SettingsPage({
     setIsDirty(true);
     setDraft((current) => ({ ...current, [key]: value }));
     setSaveFeedback({ state: "idle", message: "" });
+
+    if (isSecretSettingKey(key)) {
+      setClearedSecrets((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    }
 
     if (key === "whisperModel") {
       clearValidation("whisper-local");
@@ -169,18 +215,17 @@ export function SettingsPage({
   }
 
   async function handleSave() {
-    setSaveFeedback({ state: "pending", message: "Saving..." });
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
 
-    try {
+    await persistDraft(draft, clearedSecrets, { showFeedback: true });
+    if (false) {
       await onSave(draft);
       // Don't clear isDirty — keep it true so that background refreshData()
       // calls after recordings never overwrite the user's current settings view.
       setSaveFeedback({ state: "success", message: "Saved." });
-    } catch (error) {
-      setSaveFeedback({
-        state: "error",
-        message: error instanceof Error ? error.message : "Unable to save settings.",
-      });
     }
   }
 
@@ -191,7 +236,7 @@ export function SettingsPage({
     }));
 
     try {
-      const result = await onTestProvider(provider, draft);
+      const result = await onTestProvider(provider, buildSettingsSaveInput(draft, clearedSecrets));
       setValidationFeedback((current) => ({
         ...current,
         [provider]: { state: result.ok ? "success" : "error", message: result.message },
@@ -205,6 +250,69 @@ export function SettingsPage({
         },
       }));
     }
+  }
+
+  async function persistDraft(
+    nextDraft: AppSettings,
+    nextClearedSecrets: Partial<Record<SecretSettingKey, boolean>>,
+    options: { showFeedback: boolean }
+  ) {
+    const requestId = saveRequestIdRef.current + 1;
+    saveRequestIdRef.current = requestId;
+
+    if (options.showFeedback) {
+      setSaveFeedback({ state: "pending", message: "Saving..." });
+    }
+
+    try {
+      await onSave(buildSettingsSaveInput(nextDraft, nextClearedSecrets));
+
+      if (saveRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setDraft(clearSecretDraftValues(nextDraft));
+      setClearedSecrets({});
+      setIsDirty(false);
+
+      if (options.showFeedback) {
+        setSaveFeedback({ state: "success", message: "Saved." });
+      } else {
+        setSaveFeedback((current) => (current.state === "error" ? { state: "idle", message: "" } : current));
+      }
+    } catch (error) {
+      if (saveRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setSaveFeedback({
+        state: "error",
+        message: error instanceof Error ? error.message : "Unable to save settings.",
+      });
+    }
+  }
+
+  function resetSecretInput(key: SecretSettingKey) {
+    setIsDirty(true);
+    setDraft((current) => ({ ...current, [key]: "" }));
+    setClearedSecrets((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setSaveFeedback({ state: "idle", message: "" });
+    clearValidation(getProviderBySecretKey(key));
+  }
+
+  function toggleSecretClear(key: SecretSettingKey) {
+    setIsDirty(true);
+    setDraft((current) => ({ ...current, [key]: "" }));
+    setClearedSecrets((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+    setSaveFeedback({ state: "idle", message: "" });
+    clearValidation(getProviderBySecretKey(key));
   }
 
   return (
@@ -365,9 +473,14 @@ export function SettingsPage({
         {REMOTE_PROVIDERS.map((provider) => {
           const model = getProviderModel(draft, provider);
           const apiKey = getProviderKey(draft, provider);
+          const keyField = getProviderKeyField(provider);
+          const storedKeyConfigured = Boolean(providerHealthMap[provider]?.configured);
+          const clearRequested = Boolean(clearedSecrets[keyField]);
+          const apiKeyPendingReplacement = apiKey.trim().length > 0;
+          const apiKeyConfigured = apiKeyPendingReplacement || (storedKeyConfigured && !clearRequested);
           const currentTier = resolveCloudPresetTier(provider, model);
           const selectedValue = currentTier ?? CUSTOM_PRESET_VALUE;
-          const dirty = model !== getProviderModel(settings, provider) || apiKey !== getProviderKey(settings, provider);
+          const dirty = model !== getProviderModel(settings, provider) || apiKeyPendingReplacement || clearRequested;
 
           return (
             <ProviderCompactRow
@@ -379,12 +492,25 @@ export function SettingsPage({
               resolvedModel={resolveProviderModelLabel(provider, model)}
               rawModel={model}
               apiKey={apiKey}
+              apiKeyConfigured={apiKeyConfigured}
+              apiKeyHint={getApiKeyHint(storedKeyConfigured, apiKeyPendingReplacement, clearRequested)}
+              apiKeyActionLabel={getApiKeyActionLabel(storedKeyConfigured, apiKeyPendingReplacement, clearRequested)}
               health={providerHealthMap[provider]}
               feedback={validationFeedback[provider]}
               dirty={dirty}
               disabled={saveFeedback.state === "pending"}
               onSelectionChange={(value) => updateProviderSelection(provider, value)}
               onApiKeyChange={(value) => updateDraft(getProviderKeyField(provider), value)}
+              onApiKeyAction={() => {
+                if (apiKeyPendingReplacement) {
+                  resetSecretInput(keyField);
+                  return;
+                }
+
+                if (storedKeyConfigured || clearRequested) {
+                  toggleSecretClear(keyField);
+                }
+              }}
               onValidate={() => handleValidate(provider)}
             />
           );
@@ -402,12 +528,16 @@ function ProviderCompactRow({
   resolvedModel,
   rawModel,
   apiKey,
+  apiKeyConfigured,
+  apiKeyHint,
+  apiKeyActionLabel,
   health,
   feedback,
   dirty,
   disabled,
   onSelectionChange,
   onApiKeyChange,
+  onApiKeyAction,
   onValidate,
 }: {
   title: string;
@@ -417,12 +547,16 @@ function ProviderCompactRow({
   resolvedModel: string;
   rawModel?: string;
   apiKey?: string;
+  apiKeyConfigured?: boolean;
+  apiKeyHint?: string;
+  apiKeyActionLabel?: string;
   health?: ProviderHealth;
   feedback?: AsyncFeedback;
   dirty: boolean;
   disabled: boolean;
   onSelectionChange: (value: string) => void;
   onApiKeyChange?: (value: string) => void;
+  onApiKeyAction?: () => void;
   onValidate: () => Promise<void>;
 }) {
   const status = getProviderStatus(provider, health, feedback, dirty);
@@ -462,7 +596,19 @@ function ProviderCompactRow({
         {apiKey !== undefined && onApiKeyChange ? (
           <label className="field compact-field key-field">
             <span>API key</span>
-            <input type="password" value={apiKey} onChange={(event) => onApiKeyChange(event.target.value)} placeholder={`${title} API key`} />
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(event) => onApiKeyChange(event.target.value)}
+              placeholder={apiKeyConfigured ? `${title} API key saved securely` : `${title} API key`}
+              autoComplete="off"
+            />
+            {apiKeyHint ? <small className="key-field-note">{apiKeyHint}</small> : null}
+            {apiKeyActionLabel && onApiKeyAction ? (
+              <button type="button" className="ghost-button compact-button key-field-action" disabled={disabled} onClick={onApiKeyAction}>
+                {apiKeyActionLabel}
+              </button>
+            ) : null}
           </label>
         ) : (
           <div className="provider-inline-note provider-inline-note-compact">
@@ -594,6 +740,82 @@ function getProviderKeyField(provider: Exclude<ProviderId, "whisper-local">): "o
     case "deepgram":
       return "deepgramApiKey";
   }
+}
+
+function buildSettingsSaveInput(
+  draft: AppSettings,
+  clearedSecrets: Partial<Record<SecretSettingKey, boolean>>
+): SettingsSaveInput {
+  return {
+    patch: draft,
+    clearSecrets: SECRET_SETTING_KEY_LIST.filter((key) => clearedSecrets[key]),
+  };
+}
+
+function clearSecretDraftValues(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    openaiApiKey: "",
+    groqApiKey: "",
+    deepgramApiKey: "",
+  };
+}
+
+function hasConfiguredRemoteKey(
+  provider: RemoteProviderId,
+  draft: AppSettings,
+  providerHealthMap: Partial<Record<ProviderId, ProviderHealth>>,
+  clearedSecrets: Partial<Record<SecretSettingKey, boolean>>
+) {
+  const keyField = getProviderKeyField(provider);
+  return draft[keyField].trim().length > 0 || (Boolean(providerHealthMap[provider]?.configured) && !clearedSecrets[keyField]);
+}
+
+function isSecretSettingKey(key: keyof AppSettings): key is SecretSettingKey {
+  return key === "openaiApiKey" || key === "groqApiKey" || key === "deepgramApiKey";
+}
+
+function getProviderBySecretKey(key: SecretSettingKey): RemoteProviderId {
+  switch (key) {
+    case "openaiApiKey":
+      return "openai";
+    case "groqApiKey":
+      return "groq";
+    case "deepgramApiKey":
+      return "deepgram";
+  }
+}
+
+function getApiKeyHint(storedKeyConfigured: boolean, pendingReplacement: boolean, clearRequested: boolean) {
+  if (pendingReplacement) {
+    return "New key will replace the saved one on save.";
+  }
+
+  if (clearRequested) {
+    return "Saved key will be removed on save.";
+  }
+
+  if (storedKeyConfigured) {
+    return "Saved securely on this device. Leave the field blank to keep it.";
+  }
+
+  return "Saved only on this device after you enter one.";
+}
+
+function getApiKeyActionLabel(storedKeyConfigured: boolean, pendingReplacement: boolean, clearRequested: boolean) {
+  if (pendingReplacement) {
+    return "Reset";
+  }
+
+  if (clearRequested) {
+    return "Keep saved key";
+  }
+
+  if (storedKeyConfigured) {
+    return "Clear saved key";
+  }
+
+  return "";
 }
 
 function formatLocalModelSize(sizeBytes: number | null) {

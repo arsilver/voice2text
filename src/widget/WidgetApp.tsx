@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { RecordingState } from "@shared/types";
+import type { ImproverState, RecordingState } from "@shared/types";
 
 const METER_WEIGHTS = [0.36, 0.56, 0.78, 1, 0.78, 0.56, 0.36];
 
@@ -11,6 +11,10 @@ export function WidgetApp() {
   const targetLevelRef = useRef(0);
   const lastLevelUpdateAtRef = useRef(0);
 
+  const [lastTranscription, setLastTranscription] = useState<string | null>(null);
+  const [improverState, setImproverState] = useState<ImproverState>("idle");
+  const [autoCopyOn, setAutoCopyOn] = useState(true);
+
   useEffect(() => {
     const unsubscribeState = window.craftvoice.recording.onStateChange((nextState) => {
       setState(nextState);
@@ -19,15 +23,32 @@ export function WidgetApp() {
         lastLevelUpdateAtRef.current = 0;
         setDisplayLevel(0);
       }
+      // Clear last transcription when a new recording starts
+      if (nextState === "recording") {
+        setLastTranscription(null);
+        setImproverState("idle");
+      }
     });
     const unsubscribeLevel = window.craftvoice.recording.onLevelChange((level) => {
       targetLevelRef.current = clamp01(level);
       lastLevelUpdateAtRef.current = performance.now();
     });
+    const unsubscribeResult = window.craftvoice.recording.onResult((result) => {
+      setLastTranscription(result.text);
+    });
+    const unsubscribeImproverState = window.craftvoice.improver.onStateChange((nextState) => {
+      setImproverState(nextState);
+    });
+    const unsubscribeImproverResult = window.craftvoice.improver.onResult(() => {
+      // Result handled — state already set to "done" via onStateChange
+    });
 
     return () => {
       unsubscribeState();
       unsubscribeLevel();
+      unsubscribeResult();
+      unsubscribeImproverState();
+      unsubscribeImproverResult();
     };
   }, []);
 
@@ -65,39 +86,69 @@ export function WidgetApp() {
     }
   }
 
+  function handleImprove() {
+    if (!lastTranscription || improverState === "improving") return;
+    void window.craftvoice.improver.improve(lastTranscription);
+  }
+
   const disabled = state === "transcribing" || isToggling;
   const bars = useMemo(() => buildMeterBars(state === "recording" ? displayLevel : 0), [displayLevel, state]);
+  const showActionBar = lastTranscription !== null;
+
+  useEffect(() => {
+    void window.craftvoice.app.setWidgetExpanded(showActionBar);
+  }, [showActionBar]);
 
   return (
-    <div
-      className={`widget-shell widget-shell-${state}${disabled ? " widget-shell-disabled" : ""}`}
-      role="button"
-      tabIndex={0}
-      aria-disabled={disabled}
-      onDoubleClick={() => void handleToggle()}
-      onKeyDown={(event) => {
-        if ((event.key === "Enter" || event.key === " ") && !disabled) {
-          event.preventDefault();
-          void handleToggle();
-        }
-      }}
-    >
-      <div className={`widget-dot widget-${state}`} />
-      <div className="widget-copy">
-        <strong>CraftVoice</strong>
-        <span>{widgetLabel(state, isToggling)}</span>
-      </div>
-      {state === "recording" ? (
-        <div className="widget-meter" aria-hidden="true">
-          {bars.map((height, index) => (
-            <span key={index} style={{ height: `${height}px` }} />
-          ))}
+    <div className={`widget-wrapper${showActionBar ? " widget-wrapper-expanded" : ""}`}>
+      <div
+        className={`widget-shell widget-shell-${state}${disabled ? " widget-shell-disabled" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-disabled={disabled}
+        onDoubleClick={() => void handleToggle()}
+        onKeyDown={(event) => {
+          if ((event.key === "Enter" || event.key === " ") && !disabled) {
+            event.preventDefault();
+            void handleToggle();
+          }
+        }}
+      >
+        <div className={`widget-dot widget-${state}`} />
+        <div className="widget-copy">
+          <strong>CraftVoice</strong>
+          <span>{widgetLabel(state, isToggling)}</span>
         </div>
-      ) : (
-        <div className="widget-wave" aria-hidden="true">
-          <span />
-          <span />
-          <span />
+        {state === "recording" ? (
+          <div className="widget-meter" aria-hidden="true">
+            {bars.map((height, index) => (
+              <span key={index} style={{ height: `${height}px` }} />
+            ))}
+          </div>
+        ) : (
+          <div className="widget-wave" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+        )}
+      </div>
+      {showActionBar && (
+        <div className="widget-action-bar">
+          <button
+            className={`widget-improve-btn${improverState === "done" ? " widget-improve-btn-done" : ""}`}
+            disabled={improverState === "improving"}
+            onClick={handleImprove}
+          >
+            {improverState === "improving" ? "Improving\u2026" : improverState === "done" ? "Improved" : "Improve"}
+          </button>
+          <button
+            className={`widget-copy-toggle${autoCopyOn ? " widget-copy-toggle-active" : ""}`}
+            onClick={() => setAutoCopyOn(!autoCopyOn)}
+            title={autoCopyOn ? "Auto-copy on" : "Auto-copy off"}
+          >
+            Copy
+          </button>
         </div>
       )}
     </div>

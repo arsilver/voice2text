@@ -12,6 +12,7 @@
     "src/main/recording-workflow.test.ts",
     "src/main/db/settings-safety.test.ts",
     "src/main/transcribe/whisper-runtime.test.ts",
-    "src/main/utils/file-logger.test.ts"
+    "src/main/utils/file-logger.test.ts",
+    "src/shared/settings-secrets.test.ts"
   ]
 }

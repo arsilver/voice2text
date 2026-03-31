@@ -8,6 +8,10 @@ function getProjectRoot() {
   return path.resolve(import.meta.dirname, "..", "..");
 }
 
+function getPreferredUserDataDir() {
+  return path.join(app.getPath("appData"), "craftvoice");
+}
+
 function getAppRoot() {
   return app.isPackaged ? app.getAppPath() : getProjectRoot();
 }
@@ -26,7 +30,7 @@ export function ensureDirectory(dirPath: string) {
 }
 
 export function getUserDataDir() {
-  return ensureDirectory(app.getPath("userData"));
+  return ensureDirectory(getPreferredUserDataDir());
 }
 
 export function getSessionDataDir() {
@@ -43,6 +47,7 @@ export function getCrashDumpsDir() {
 
 export function configureAppPaths() {
   const userDataDir = getUserDataDir();
+  app.setPath("userData", userDataDir);
   const sessionDataDir = getSessionDataDir();
   const crashDumpsDir = getCrashDumpsDir();
 
@@ -54,6 +59,32 @@ export function configureAppPaths() {
     userDataDir,
     sessionDataDir,
   };
+}
+
+export function migrateLegacyElectronUserData() {
+  const userDataDir = getUserDataDir();
+  const legacyUserDataDir = path.join(app.getPath("appData"), "Electron");
+
+  if (path.resolve(legacyUserDataDir) === path.resolve(userDataDir) || !fs.existsSync(legacyUserDataDir)) {
+    return [];
+  }
+
+  const candidates = ["craftvoice.db", "craftvoice.db-shm", "craftvoice.db-wal", "resources", "logs"];
+  const migrated: string[] = [];
+
+  for (const entry of candidates) {
+    const sourcePath = path.join(legacyUserDataDir, entry);
+    const destinationPath = path.join(userDataDir, entry);
+
+    if (!fs.existsSync(sourcePath) || fs.existsSync(destinationPath)) {
+      continue;
+    }
+
+    fs.cpSync(sourcePath, destinationPath, { recursive: true });
+    migrated.push(entry);
+  }
+
+  return migrated;
 }
 
 export function getTempDir() {

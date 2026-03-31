@@ -6,6 +6,7 @@ import { Sidebar } from "@renderer/components/Sidebar";
 import { DictionaryPage } from "@renderer/pages/DictionaryPage";
 import { HistoryPage } from "@renderer/pages/HistoryPage";
 import { OverviewPage } from "@renderer/pages/OverviewPage";
+import { PromptImproverPage } from "@renderer/pages/PromptImproverPage";
 import { PromptsPage } from "@renderer/pages/PromptsPage";
 import { SettingsPage } from "@renderer/pages/SettingsPage";
 import { ShortcutsPage } from "@renderer/pages/ShortcutsPage";
@@ -17,11 +18,13 @@ import type {
   DashboardStats,
   DictionaryEntry,
   HotkeyStatus,
+  ImprovedPrompt,
   LocalModelInfo,
   PromptCard,
   ProviderHealth,
   ProviderId,
   RecordingState,
+  SettingsSaveInput,
   TranscriptionRecord,
   TranscriptionResult,
   WhisperModelOption,
@@ -42,6 +45,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/dictionary": "Dictionary",
   "/shortcuts": "Shortcuts",
   "/settings": "Settings",
+  "/prompt-improver": "Improver",
 };
 
 export function App() {
@@ -51,6 +55,7 @@ export function App() {
   const [historyHasMore, setHistoryHasMore] = useState(true);
   const [dictionary, setDictionary] = useState<DictionaryEntry[]>([]);
   const [prompts, setPrompts] = useState<PromptCard[]>([]);
+  const [improvements, setImprovements] = useState<ImprovedPrompt[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
   const [whisperModels, setWhisperModels] = useState<WhisperModelOption[]>([]);
@@ -61,6 +66,7 @@ export function App() {
     message: "Checking hotkey...",
   });
   const [errorMessage, setErrorMessage] = useState("");
+  const [lastTranscriptionText, setLastTranscriptionText] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "warning" | "error"; message: string } | null>(null);
   const [headerAction, setHeaderAction] = useState<"idle" | "toggling" | "minimizing">("idle");
   const noticeTimeoutRef = useRef<number | null>(null);
@@ -69,11 +75,12 @@ export function App() {
   const HISTORY_PAGE_SIZE = 50;
 
   const refreshData = useEffectEvent(async () => {
-    const [nextStats, nextHistory, nextDictionary, nextPrompts, nextSettings, nextHealth, nextHotkeyStatus] = await Promise.all([
+    const [nextStats, nextHistory, nextDictionary, nextPrompts, nextImprovements, nextSettings, nextHealth, nextHotkeyStatus] = await Promise.all([
       window.craftvoice.stats.get(),
       window.craftvoice.transcriptions.list(HISTORY_PAGE_SIZE),
       window.craftvoice.dictionary.list(),
       window.craftvoice.prompts.list(),
+      window.craftvoice.improver.list(),
       window.craftvoice.settings.get(),
       window.craftvoice.settings.providerHealth(),
       window.craftvoice.app.getHotkeyStatus(),
@@ -84,6 +91,7 @@ export function App() {
     setHistoryHasMore(nextHistory.length >= HISTORY_PAGE_SIZE);
     setDictionary(nextDictionary);
     setPrompts(nextPrompts);
+    setImprovements(nextImprovements);
     setSettings(nextSettings);
     setProviderHealth(nextHealth);
     setHotkeyStatus(nextHotkeyStatus);
@@ -111,6 +119,7 @@ export function App() {
 
   const handleRecordingResult = useEffectEvent((result: TranscriptionResult) => {
     setErrorMessage("");
+    setLastTranscriptionText(result.text);
     showNotice(getRecordingNotice(result, settings), getRecordingNoticeTone(result, settings));
     void refreshData();
   });
@@ -158,8 +167,8 @@ export function App() {
     };
   }, []);
 
-  async function savePatch(patch: Partial<AppSettings>) {
-    const nextSettings = await window.craftvoice.settings.save(patch);
+  async function savePatch(input: Partial<AppSettings> | SettingsSaveInput) {
+    const nextSettings = await window.craftvoice.settings.save(input);
     setSettings(nextSettings);
     setProviderHealth(await window.craftvoice.settings.providerHealth());
     setHotkeyStatus(await window.craftvoice.app.getHotkeyStatus());
@@ -260,6 +269,33 @@ export function App() {
             }
           />
           <Route
+            path="/prompt-improver"
+            element={
+              <PromptImproverPage
+                improvements={improvements}
+                settings={settings}
+                pendingTranscription={lastTranscriptionText}
+                onConsumeTranscription={() => setLastTranscriptionText("")}
+                onImprove={async (rawText, categoryOverride) => {
+                  await window.craftvoice.improver.improve(rawText, undefined, categoryOverride);
+                  void refreshData();
+                }}
+                onCancel={async () => {
+                  await window.craftvoice.improver.cancel();
+                }}
+                onDelete={async (id) => {
+                  await window.craftvoice.improver.delete(id);
+                  await refreshData();
+                }}
+                onCopy={(text) => {
+                  navigator.clipboard.writeText(text);
+                  showNotice("Copied to clipboard.", "success", 1800);
+                }}
+                onSaveSettings={savePatch}
+              />
+            }
+          />
+          <Route
             path="/history"
             element={
               <HistoryPage
@@ -307,7 +343,7 @@ export function App() {
                 whisperModels={whisperModels}
                 localModels={localModels}
                 onSave={savePatch}
-                onTestProvider={(provider: ProviderId, draft?: Partial<AppSettings>) => window.craftvoice.settings.testProvider(provider, draft)}
+                onTestProvider={(provider, draft) => window.craftvoice.settings.testProvider(provider, draft)}
                 onOpenDiagnosticsFolder={() => window.craftvoice.settings.openDiagnosticsFolder()}
                 onInstallLocalModel={async (modelId) => {
                   await window.craftvoice.settings.installLocalModel(modelId);

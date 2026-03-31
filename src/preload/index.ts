@@ -19,6 +19,7 @@ const api: CraftVoiceApi = {
     quit: () => ipcRenderer.invoke(IPC_CHANNELS.appQuit),
     openExternal: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.appOpenExternal, url),
     getHotkeyStatus: () => ipcRenderer.invoke(IPC_CHANNELS.appGetHotkeyStatus),
+    setWidgetExpanded: (expanded: boolean) => ipcRenderer.invoke(IPC_CHANNELS.widgetSetExpanded, expanded),
   },
   recording: {
     toggle: () => ipcRenderer.invoke(IPC_CHANNELS.recordingToggle),
@@ -51,6 +52,17 @@ const api: CraftVoiceApi = {
     update: (id: string, entry: SavePromptCardInput) => ipcRenderer.invoke(IPC_CHANNELS.promptsUpdate, id, entry),
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.promptsDelete, id),
     copy: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.promptsCopy, id),
+  },
+  improver: {
+    improve: (rawText: string, transcriptionId?: string, categoryOverride?: string) => ipcRenderer.invoke(IPC_CHANNELS.improverImprove, rawText, transcriptionId, categoryOverride),
+    cancel: () => ipcRenderer.invoke(IPC_CHANNELS.improverCancel),
+    list: (limit?: number, offset?: number) => ipcRenderer.invoke(IPC_CHANNELS.improverList, limit, offset),
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.improverDelete, id),
+    detectTools: () => ipcRenderer.invoke(IPC_CHANNELS.improverDetectTools),
+    onStateChange: (listener) => subscribe(IPC_CHANNELS.improverStateChanged, listener),
+    onResult: (listener) => subscribe(IPC_CHANNELS.improverResult, listener),
+    onError: (listener) => subscribe(IPC_CHANNELS.improverError, listener),
+    onLog: (listener) => subscribe(IPC_CHANNELS.improverLog, listener),
   },
   settings: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),

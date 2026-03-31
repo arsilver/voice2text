@@ -39,6 +39,8 @@ async function loadWindow(window: Electron.BrowserWindow, fileName: "index.html"
 }
 
 function attachWindowDiagnostics(window: Electron.BrowserWindow, label: "main" | "widget") {
+  let rendererCrashCount = 0;
+
   const logLifecycle = (event: string, details?: Record<string, unknown>) => {
     log.info("Window lifecycle", withDiagnosticsContext({
       event,
@@ -77,6 +79,26 @@ function attachWindowDiagnostics(window: Electron.BrowserWindow, label: "main" |
 
   window.webContents.on("render-process-gone", (_event, details) => {
     log.error(`${label} renderer exited unexpectedly`, withDiagnosticsContext({ ...details, window: label }));
+
+    if (window.isDestroyed()) {
+      return;
+    }
+
+    // Reload the renderer after a short delay to recover from crashes.
+    // Cap at 3 attempts to avoid infinite crash-reload loops.
+    rendererCrashCount++;
+    if (rendererCrashCount > 3) {
+      log.error(`${label} renderer crashed too many times, giving up`, withDiagnosticsContext({ window: label }));
+      return;
+    }
+
+    const attempt = rendererCrashCount;
+    setTimeout(() => {
+      if (!window.isDestroyed()) {
+        log.info(`Reloading ${label} renderer after crash (attempt ${attempt})`, withDiagnosticsContext({ window: label }));
+        window.webContents.reload();
+      }
+    }, 1500);
   });
 
   window.webContents.on("preload-error", (_event, preloadPath, error) => {
@@ -105,12 +127,12 @@ function attachWindowDiagnostics(window: Electron.BrowserWindow, label: "main" |
       window: label,
     };
 
-    if (level >= 2) {
+    if (level >= 3) {
       log.error("Renderer console", payload);
       return;
     }
 
-    if (level === 1) {
+    if (level === 2) {
       log.warn("Renderer console", payload);
       return;
     }
@@ -226,7 +248,11 @@ export async function createWidgetWindow() {
     stopWidgetGuard();
   });
   widgetWindow.on("show", () => {
-    pinWidgetWindow(true);
+    // Re-pin without calling showInactive() to avoid recursive show loop.
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.setAlwaysOnTop(true, "screen-saver");
+      widgetWindow.moveTop();
+    }
   });
   widgetWindow.on("restore", () => {
     pinWidgetWindow(true);
@@ -297,6 +323,17 @@ export function setWidgetVisibility(visible: boolean) {
   }
 }
 
+export function setWidgetExpanded(expanded: boolean) {
+  if (!widgetWindow || widgetWindow.isDestroyed()) {
+    return;
+  }
+
+  const height = expanded ? 100 : 72;
+  widgetWindow.setMinimumSize(240, height);
+  widgetWindow.setMaximumSize(240, height);
+  widgetWindow.setSize(240, height);
+}
+
 export function broadcast(channel: string, payload?: unknown) {
   mainWindow?.webContents.send(channel, payload);
   widgetWindow?.webContents.send(channel, payload);
@@ -328,13 +365,17 @@ function startWidgetGuard() {
       return;
     }
 
-    if (getSettings().showFloatingWidget) {
-      pinWidgetWindow(true);
+    try {
+      if (getSettings().showFloatingWidget) {
+        pinWidgetWindow(true);
+      }
+    } catch {
+      // DB may be unavailable during shutdown — don't crash
     }
   }, 10000);
 }
 
-function stopWidgetGuard() {
+export function stopWidgetGuard() {
   if (!widgetGuardInterval) {
     return;
   }

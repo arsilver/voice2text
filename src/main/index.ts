@@ -13,8 +13,8 @@ import { createTray, rebuildTrayMenu } from "@main/tray";
 import { stopServer } from "@main/transcribe/whisper-server";
 import { getCurrentLogFilePath, getLogger } from "@main/utils/logger";
 import { getStartupRuntimeFlags } from "@main/utils/runtime-flags";
-import { configureAppPaths } from "@main/utils/paths";
-import { createMainWindow, getMainWindow, setWidgetVisibility, setWindowDiagnosticsContext, showMainWindow } from "@main/windows";
+import { configureAppPaths, migrateLegacyElectronUserData } from "@main/utils/paths";
+import { createMainWindow, getMainWindow, setWidgetVisibility, setWindowDiagnosticsContext, showMainWindow, stopWidgetGuard } from "@main/windows";
 import { hasTray } from "@main/tray";
 import type { StartupStage } from "@shared/types";
 
@@ -27,6 +27,7 @@ const startupGate = createStartupGate(startupFlags);
 let startupExtrasActivated = false;
 let startupHeartbeatTimer: NodeJS.Timeout | null = null;
 const appPaths = configureAppPaths();
+const migratedLegacyUserData = migrateLegacyElectronUserData();
 setWindowDiagnosticsContext({
   launchId,
   startupProfile: startupFlags.profile,
@@ -41,6 +42,7 @@ const gotLock = app.requestSingleInstanceLock();
 log.info("Configured app paths", {
   launchId,
   ...appPaths,
+  migratedLegacyUserData,
 });
 log.info("Startup runtime flags", {
   launchId,
@@ -118,8 +120,14 @@ async function revealPrimaryInstance() {
   showMainWindow();
 }
 
+app.on("window-all-closed", () => {
+  // Don't quit when all windows close — the app lives in the tray.
+  // Quit is only triggered explicitly via tray menu or IPC.
+});
+
 app.on("before-quit", () => {
   app.isQuitting = true;
+  stopWidgetGuard();
   unregisterHotkeys();
   void stopServer();
   closeDb();

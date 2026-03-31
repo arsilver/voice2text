@@ -17,6 +17,7 @@ const child = spawn(electronPath, appArgs.length > 0 ? appArgs : ["."], {
   env,
   stdio: "inherit",
   windowsHide: false,
+  detached: process.platform === "win32",
 });
 
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) {

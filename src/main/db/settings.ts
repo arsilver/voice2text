@@ -3,9 +3,10 @@ import fs from "node:fs";
 
 import { getDb } from "./database";
 import { DEFAULT_SETTINGS, SECRET_SETTING_KEYS } from "@shared/constants";
+import { normalizeSettingsSaveInput, redactSettingsSecrets, resolveSettingsSave } from "@shared/settings-secrets";
 import { normalizeFallbackOrder } from "@shared/provider-order";
 import { LOCAL_WHISPER_PRESETS, prettifyLocalWhisperModel, resolveProviderModelLabel } from "@shared/provider-presets";
-import type { AppSettings, ProviderHealth, ProviderId, WhisperModelOption } from "@shared/types";
+import type { AppSettings, ProviderHealth, ProviderId, SettingsSaveInput, WhisperModelOption } from "@shared/types";
 import { getLogger } from "@main/utils/logger";
 import { getWhisperExecutablePath, getWhisperModelPath, getWhisperModelsDir } from "@main/utils/paths";
 import { isSafeModeEnabled } from "@main/utils/runtime-flags";
@@ -25,6 +26,30 @@ const { safeStorage } = electronMain;
 const log = getLogger("settings");
 
 export function getSettings(): AppSettings {
+  return applyRuntimeSafetyOverrides(readStoredSettings(), isSafeModeEnabled());
+}
+
+export function getRendererSettings(): AppSettings {
+  return redactSettingsSecrets(getSettings());
+}
+
+export function saveSettings(input: Partial<AppSettings> | SettingsSaveInput) {
+  const normalizedInput = normalizeSettingsSaveInput(input);
+
+  if (normalizedInput.patch.fallbackOrder) {
+    normalizedInput.patch.fallbackOrder = normalizeFallbackOrder(normalizedInput.patch.fallbackOrder);
+  }
+
+  const nextStoredSettings = resolveSettingsSave(readStoredSettings(), {
+    patch: coerceUnsafeSettingsPatch({ ...normalizedInput.patch }),
+    clearSecrets: normalizedInput.clearSecrets,
+  });
+
+  persistSettings(nextStoredSettings);
+  return getSettings();
+}
+
+function readStoredSettings(): AppSettings {
   const db = getDb();
   const rows = db.prepare("SELECT key, value, is_secret FROM settings").all() as DbSettingsRow[];
   const current = { ...DEFAULT_SETTINGS };
@@ -47,31 +72,7 @@ export function getSettings(): AppSettings {
   }
 
   current.fallbackOrder = normalizeFallbackOrder(current.fallbackOrder);
-  return applyRuntimeSafetyOverrides(current, isSafeModeEnabled());
-}
-
-export function saveSettings(patch: Partial<AppSettings>) {
-  const db = getDb();
-  const normalizedPatch = coerceUnsafeSettingsPatch({ ...patch });
-
-  if (normalizedPatch.fallbackOrder) {
-    normalizedPatch.fallbackOrder = normalizeFallbackOrder(normalizedPatch.fallbackOrder);
-  }
-
-  const transaction = db.transaction((input: Partial<AppSettings>) => {
-    for (const [key, rawValue] of Object.entries(input) as [keyof AppSettings, AppSettings[keyof AppSettings]][]) {
-      const isSecret = SECRET_SETTING_KEYS.has(key);
-      const value = serializeValue(rawValue);
-      db.prepare(
-        `INSERT INTO settings (key, value, is_secret)
-         VALUES (?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = excluded.is_secret`
-      ).run(key, isSecret ? encryptValue(value) : value, isSecret ? 1 : 0);
-    }
-  });
-
-  transaction(normalizedPatch);
-  return getSettings();
+  return current;
 }
 
 export function applyStabilityResetMigration() {
@@ -295,4 +296,21 @@ interface DbSettingsRow {
   key: string;
   value: string;
   is_secret: number;
+}
+
+function persistSettings(settings: AppSettings) {
+  const db = getDb();
+  const transaction = db.transaction((input: AppSettings) => {
+    for (const [key, rawValue] of Object.entries(input) as [keyof AppSettings, AppSettings[keyof AppSettings]][]) {
+      const isSecret = SECRET_SETTING_KEYS.has(key);
+      const value = serializeValue(rawValue);
+      db.prepare(
+        `INSERT INTO settings (key, value, is_secret)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = excluded.is_secret`
+      ).run(key, isSecret ? encryptValue(value) : value, isSecret ? 1 : 0);
+    }
+  });
+
+  transaction(settings);
 }

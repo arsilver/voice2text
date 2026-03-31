@@ -25,6 +25,9 @@ const BASE_SETTINGS: AppSettings = {
   widgetPosition: { x: -1, y: -1 },
   selectedMicrophoneId: "",
   theme: "dark",
+  improverTool: "claude",
+  improverSystemPrompt: "",
+  improverAutoCopy: true,
 };
 
 test("local whisper starts the persistent server on first use", async () => {

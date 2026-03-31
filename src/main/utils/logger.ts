@@ -1,9 +1,11 @@
 import util from "node:util";
 
 import { createFileLoggerSession } from "@main/utils/file-logger";
+import { isVerboseLoggingEnabled } from "@main/utils/runtime-flags";
 import { getLogsDir } from "@main/utils/paths";
 
 const fileSession = createFileLoggerSession({ logsDir: getLogsDir() });
+const verboseLoggingEnabled = isVerboseLoggingEnabled();
 
 export function getLogger(scope: string) {
   function write(level: "INFO" | "WARN" | "ERROR", args: unknown[]) {
@@ -11,7 +13,10 @@ export function getLogger(scope: string) {
     const prefix = `[${timestamp}] [${level}] [${scope}]`;
     const serializedArgs = args.map(serializeLogArg).join(" ");
 
-    console.log(prefix, ...args);
+    if (shouldWriteToConsole(level)) {
+      const consoleMethod = level === "ERROR" ? console.error : level === "WARN" ? console.warn : console.log;
+      consoleMethod(prefix, ...args);
+    }
     fileSession.append(serializedArgs ? `${prefix} ${serializedArgs}` : prefix);
   }
 
@@ -24,6 +29,14 @@ export function getLogger(scope: string) {
 
 export function getCurrentLogFilePath() {
   return fileSession.filePath;
+}
+
+function shouldWriteToConsole(level: "INFO" | "WARN" | "ERROR") {
+  if (verboseLoggingEnabled) {
+    return true;
+  }
+
+  return level === "ERROR";
 }
 
 function serializeLogArg(value: unknown) {

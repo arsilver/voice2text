@@ -1,7 +1,8 @@
 import { getSettings } from "@main/db/settings";
 import { getLogger } from "@main/utils/logger";
+import { normalizeSettingsSaveInput, resolveSettingsSave } from "@shared/settings-secrets";
 import { normalizeFallbackOrder } from "@shared/provider-order";
-import type { AppSettings, ProviderId, ProviderTestResult, TranscriptionResult } from "@shared/types";
+import type { AppSettings, ProviderId, ProviderTestResult, SettingsSaveInput, TranscriptionResult } from "@shared/types";
 
 import { transcribeWithDeepgram, testRemoteProvider, transcribeWithGroq, transcribeWithOpenAi } from "./providers";
 import { getWhisperHealth, transcribeWithWhisper } from "./whisper-local";
@@ -105,7 +106,7 @@ export function getProviderAvailability(settings: AppSettings): Record<ProviderI
   };
 }
 
-export async function testProvider(provider: ProviderId, draft?: Partial<AppSettings>): Promise<ProviderTestResult> {
+export async function testProvider(provider: ProviderId, draft?: Partial<AppSettings> | SettingsSaveInput): Promise<ProviderTestResult> {
   const settings = mergeSettings(draft);
 
   if (provider === "whisper-local") {
@@ -133,15 +134,17 @@ export function runProvider(provider: ProviderId, buffer: Buffer, durationMs: nu
   }
 }
 
-function mergeSettings(draft?: Partial<AppSettings>) {
+function mergeSettings(draft?: Partial<AppSettings> | SettingsSaveInput) {
   if (!draft) {
     return getSettings();
   }
 
   const current = getSettings();
-  return {
-    ...current,
-    ...draft,
-    fallbackOrder: draft.fallbackOrder ? normalizeFallbackOrder(draft.fallbackOrder) : current.fallbackOrder,
-  };
+  const normalizedDraft = normalizeSettingsSaveInput(draft);
+
+  if (normalizedDraft.patch.fallbackOrder) {
+    normalizedDraft.patch.fallbackOrder = normalizeFallbackOrder(normalizedDraft.patch.fallbackOrder);
+  }
+
+  return resolveSettingsSave(current, normalizedDraft);
 }

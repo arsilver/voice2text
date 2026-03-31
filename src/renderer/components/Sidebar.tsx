@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 const routes = [
   { path: "/overview", label: "Overview" },
   { path: "/prompts", label: "Prompts" },
+  { path: "/prompt-improver", label: "Improver" },
   { path: "/history", label: "History" },
   { path: "/dictionary", label: "Dictionary" },
   { path: "/shortcuts", label: "Shortcuts" },

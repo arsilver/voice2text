@@ -39,6 +39,9 @@ test("runtime safety overrides keep clipboard-only delivery and safe mode hides 
       widgetPosition: { x: -1, y: -1 },
       selectedMicrophoneId: "",
       theme: "dark",
+      improverTool: "claude",
+      improverSystemPrompt: "",
+      improverAutoCopy: true,
     },
     true
   );

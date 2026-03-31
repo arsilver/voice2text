@@ -30,4 +30,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   widgetPosition: { x: -1, y: -1 },
   selectedMicrophoneId: "",
   theme: "dark",
+  improverTool: "claude",
+  improverSystemPrompt: "",
+  improverAutoCopy: true,
 };

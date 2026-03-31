@@ -11,6 +11,7 @@ const KNOWN_BOOLEAN_KEYS = new Set<keyof AppSettings>([
   "playSounds",
   "aiTextPolish",
   "showFloatingWidget",
+  "improverAutoCopy",
 ]);
 
 const KNOWN_JSON_KEYS = new Set<keyof AppSettings>([

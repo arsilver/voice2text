@@ -4,7 +4,7 @@ import electronMain from "electron/main";
 import { addDictionaryEntry, deleteDictionaryEntry, listDictionaryEntries, updateDictionaryEntry } from "@main/db/dictionary";
 import { addPromptCard, deletePromptCard, getPromptCard, listPromptCards, updatePromptCard } from "@main/db/prompts";
 import { getDashboardStats, deleteTranscription, listTranscriptions, reinsertTranscription, saveTranscription } from "@main/db/transcriptions";
-import { getProviderHealth, getSettings, listWhisperModels, saveSettings } from "@main/db/settings";
+import { getProviderHealth, getRendererSettings, getSettings, listWhisperModels, saveSettings } from "@main/db/settings";
 import { getHotkeyStatus, isHotkeyRegistrationEnabled, refreshHotkeys, toggleRecording } from "@main/hotkeys";
 import { installLocalModel, listLocalModels, removeLocalModel } from "@main/local-models";
 import { processRecordingSubmission } from "@main/recording-workflow";
@@ -13,8 +13,11 @@ import { hasTray, rebuildTrayMenu } from "@main/tray";
 import { transcribeAudio, testProvider } from "@main/transcribe/router";
 import { getLogger } from "@main/utils/logger";
 import { getDiagnosticsDir } from "@main/utils/paths";
-import { broadcast, getMainWindow, hideMainWindow, showMainWindow, setWidgetVisibility } from "@main/windows";
+import { broadcast, getMainWindow, hideMainWindow, showMainWindow, setWidgetExpanded, setWidgetVisibility } from "@main/windows";
 import { applyDictionary } from "./db/dictionary";
+import { listImprovedPrompts, deleteImprovedPrompt } from "@main/db/improved-prompts";
+import { handleImprovePrompt, cancelActiveImprovement } from "@main/prompt-improver/index";
+import { detectCliTools } from "@main/prompt-improver/detect-tools";
 import {
   IPC_CHANNELS,
   type AppSettings,
@@ -22,6 +25,7 @@ import {
   type ProviderId,
   type SaveDictionaryInput,
   type SavePromptCardInput,
+  type SettingsSaveInput,
   type StartupProfile,
   type StartupStage,
 } from "@shared/types";
@@ -99,13 +103,14 @@ export function registerIpcHandlers(options: IpcHandlerOptions) {
     clipboard.writeText(getPromptCard(id).body);
   });
 
-  ipcMain.handle(IPC_CHANNELS.settingsGet, () => getSettings());
-  ipcMain.handle(IPC_CHANNELS.settingsSave, (_, patch: Partial<AppSettings>) => {
+  ipcMain.handle(IPC_CHANNELS.settingsGet, () => getRendererSettings());
+  ipcMain.handle(IPC_CHANNELS.settingsSave, (_, input: Partial<AppSettings> | SettingsSaveInput) => {
     const previous = getSettings();
-    const settings = saveSettings(patch);
+    const normalizedInput = "patch" in input ? input : { patch: input };
+    const settings = saveSettings(normalizedInput);
     const nextHotkeyStatus = refreshHotkeys();
 
-    if (patch.hotkey !== undefined && isHotkeyRegistrationEnabled() && !nextHotkeyStatus.registered) {
+    if (normalizedInput.patch.hotkey !== undefined && isHotkeyRegistrationEnabled() && !nextHotkeyStatus.registered) {
       saveSettings({ hotkey: previous.hotkey });
       refreshHotkeys();
       throw new Error(nextHotkeyStatus.message);
@@ -115,7 +120,7 @@ export function registerIpcHandlers(options: IpcHandlerOptions) {
     if (hasTray()) {
       rebuildTrayMenu();
     }
-    return getSettings();
+    return getRendererSettings();
   });
   ipcMain.handle(IPC_CHANNELS.settingsProviderHealth, () => getProviderHealth());
   ipcMain.handle(IPC_CHANNELS.settingsWhisperModels, () => listWhisperModels());
@@ -126,7 +131,7 @@ export function registerIpcHandlers(options: IpcHandlerOptions) {
   ipcMain.handle(IPC_CHANNELS.settingsRemoveLocalModel, async (_, modelId: string) => {
     await removeLocalModel(modelId);
   });
-  ipcMain.handle(IPC_CHANNELS.settingsTestProvider, (_, provider: ProviderId, draft?: Partial<AppSettings>) => testProvider(provider, draft));
+  ipcMain.handle(IPC_CHANNELS.settingsTestProvider, (_, provider: ProviderId, draft?: Partial<AppSettings> | SettingsSaveInput) => testProvider(provider, draft));
   ipcMain.handle(IPC_CHANNELS.settingsOpenDiagnosticsFolder, async () => {
     const errorMessage = await shell.openPath(getDiagnosticsDir());
 
@@ -134,6 +139,20 @@ export function registerIpcHandlers(options: IpcHandlerOptions) {
       throw new Error(errorMessage);
     }
   });
+
+  ipcMain.handle(IPC_CHANNELS.widgetSetExpanded, (_, expanded: boolean) => {
+    setWidgetExpanded(expanded);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.improverImprove, async (_, rawText: string, transcriptionId?: string, categoryOverride?: string) => {
+    await handleImprovePrompt(rawText, transcriptionId, (categoryOverride || undefined) as import("@shared/types").PromptCategory | undefined);
+  });
+  ipcMain.handle(IPC_CHANNELS.improverCancel, () => cancelActiveImprovement());
+  ipcMain.handle(IPC_CHANNELS.improverList, (_, limit?: number, offset?: number) => listImprovedPrompts(limit, offset));
+  ipcMain.handle(IPC_CHANNELS.improverDelete, (_, id: string) => {
+    deleteImprovedPrompt(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.improverDetectTools, () => detectCliTools());
 
   log.info("IPC handlers registered");
 }

@@ -2,12 +2,16 @@ export type RecordingState = "idle" | "recording" | "transcribing" | "error";
 export type RecordingCommand = "start" | "stop";
 export type ProviderId = "whisper-local" | "openai" | "groq" | "deepgram";
 export type RemoteProviderId = Exclude<ProviderId, "whisper-local">;
+export type SecretSettingKey = "groqApiKey" | "openaiApiKey" | "deepgramApiKey";
 export type ProviderTier = "economy" | "best";
 export type DeliveryMode = "copy" | "paste-and-copy";
 export type LocalModelSource = "managed" | "bundled";
 export type LocalModelStage = "idle" | "downloading" | "installing" | "ready" | "error";
 export type StartupProfile = "normal" | "minimal" | "safe";
 export type StartupStage = "dom-ready" | "app-mounted" | "interactive";
+export type ImproverTool = "claude" | "codex" | "kimi";
+export type ImproverState = "idle" | "improving" | "done" | "error";
+export type PromptCategory = "coding" | "planning" | "debugging" | "brainstorming" | "architecture" | "documentation" | "code-review" | "general";
 
 export interface WidgetPosition {
   x: number;
@@ -34,6 +38,14 @@ export interface AppSettings {
   widgetPosition: WidgetPosition;
   selectedMicrophoneId: string;
   theme: "dark";
+  improverTool: ImproverTool;
+  improverSystemPrompt: string;
+  improverAutoCopy: boolean;
+}
+
+export interface SettingsSaveInput {
+  patch: Partial<AppSettings>;
+  clearSecrets?: SecretSettingKey[];
 }
 
 export interface DashboardStats {
@@ -72,6 +84,32 @@ export interface PromptCard {
   body: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ImprovedPrompt {
+  id: string;
+  transcriptionId: string | null;
+  createdAt: string;
+  rawInput: string;
+  improvedText: string;
+  tool: ImproverTool;
+  category: PromptCategory;
+  durationMs: number;
+}
+
+export interface ImproveResult {
+  id: string;
+  rawInput: string;
+  improvedText: string;
+  tool: ImproverTool;
+  category: PromptCategory;
+  durationMs: number;
+}
+
+export interface ImproverLogEntry {
+  timestamp: string;
+  level: "info" | "warn" | "error";
+  message: string;
 }
 
 export interface ProviderHealth {
@@ -179,6 +217,7 @@ export interface CraftVoiceApi {
     quit: () => Promise<void>;
     openExternal: (url: string) => Promise<void>;
     getHotkeyStatus: () => Promise<HotkeyStatus>;
+    setWidgetExpanded: (expanded: boolean) => Promise<void>;
   };
   recording: {
     toggle: () => Promise<RecordingState>;
@@ -212,15 +251,26 @@ export interface CraftVoiceApi {
     delete: (id: string) => Promise<void>;
     copy: (id: string) => Promise<void>;
   };
+  improver: {
+    improve: (rawText: string, transcriptionId?: string, categoryOverride?: PromptCategory) => Promise<void>;
+    cancel: () => Promise<void>;
+    list: (limit?: number, offset?: number) => Promise<ImprovedPrompt[]>;
+    delete: (id: string) => Promise<void>;
+    detectTools: () => Promise<Record<ImproverTool, boolean>>;
+    onStateChange: (listener: (state: ImproverState) => void) => () => void;
+    onResult: (listener: (result: ImproveResult) => void) => () => void;
+    onError: (listener: (message: string) => void) => () => void;
+    onLog: (listener: (entry: ImproverLogEntry) => void) => () => void;
+  };
   settings: {
     get: () => Promise<AppSettings>;
-    save: (patch: Partial<AppSettings>) => Promise<AppSettings>;
+    save: (input: Partial<AppSettings> | SettingsSaveInput) => Promise<AppSettings>;
     providerHealth: () => Promise<ProviderHealth[]>;
     whisperModels: () => Promise<WhisperModelOption[]>;
     localModels: () => Promise<LocalModelInfo[]>;
     installLocalModel: (modelId: string) => Promise<void>;
     removeLocalModel: (modelId: string) => Promise<void>;
-    testProvider: (provider: ProviderId, draft?: Partial<AppSettings>) => Promise<ProviderTestResult>;
+    testProvider: (provider: ProviderId, draft?: Partial<AppSettings> | SettingsSaveInput) => Promise<ProviderTestResult>;
     openDiagnosticsFolder: () => Promise<void>;
     onLocalModelProgress: (listener: (progress: LocalModelProgress) => void) => () => void;
   };
@@ -268,4 +318,14 @@ export const IPC_CHANNELS = {
   settingsOpenDiagnosticsFolder: "settings:open-diagnostics-folder",
   settingsLocalModelProgress: "settings:local-model-progress",
   widgetSetMouseThrough: "widget:set-mouse-through",
+  widgetSetExpanded: "widget:set-expanded",
+  improverImprove: "improver:improve",
+  improverCancel: "improver:cancel",
+  improverList: "improver:list",
+  improverDelete: "improver:delete",
+  improverStateChanged: "improver:state-changed",
+  improverResult: "improver:result",
+  improverError: "improver:error",
+  improverDetectTools: "improver:detect-tools",
+  improverLog: "improver:log",
 } as const;
