@@ -9,3 +9,16 @@ resources/whisper/Release/
 !resources/whisper/.gitkeep
 !resources/models/.gitkeep
 
+# Build output
+release/
+
+# IDE / AI tooling artifacts
+.codex/
+.playwright-mcp/
+
+# Research & generated artifacts
+ai_tools_from_git/
+output/
+research/
+overview-stats-check.png
+scripts/generate_app_summary_pdf.py
