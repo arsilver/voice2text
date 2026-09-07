@@ -19,9 +19,10 @@ const TOOL_LABELS: Record<ImproverTool, string> = {
   claude: "Claude",
   codex: "Codex",
   kimi: "Kimi",
+  grok: "Grok",
 };
 
-const TOOLS: ImproverTool[] = ["claude", "codex", "kimi"];
+const TOOLS: ImproverTool[] = ["claude", "codex", "kimi", "grok"];
 
 /** Lightweight client-side keyword classifier (mirrors main process logic). */
 function detectCategory(text: string): PromptCategory {
@@ -75,7 +76,7 @@ export function PromptImproverPage({
   const [expandedId, setExpandedId] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [copiedId, setCopiedId] = useState("");
-  const [availableTools, setAvailableTools] = useState<Record<ImproverTool, boolean>>({ claude: false, codex: false, kimi: false });
+  const [availableTools, setAvailableTools] = useState<Record<ImproverTool, boolean>>({ claude: false, codex: false, kimi: false, grok: false });
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [templatePreviewCategory, setTemplatePreviewCategory] = useState<PromptCategory>("general");
   const [detectedCategory, setDetectedCategory] = useState<PromptCategory>("general");

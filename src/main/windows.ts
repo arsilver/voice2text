@@ -220,13 +220,14 @@ export async function createWidgetWindow() {
   }
 
   log.info("Creating widget window", withDiagnosticsContext({ window: "widget" }));
+  // Always tall enough for shell + improver action bar (tool / Improve / Copy).
   widgetWindow = new BrowserWindow({
     width: 240,
-    height: 72,
+    height: 100,
     minWidth: 240,
-    minHeight: 72,
+    minHeight: 100,
     maxWidth: 240,
-    maxHeight: 72,
+    maxHeight: 100,
     show: false,
     transparent: true,
     frame: false,
@@ -328,7 +329,9 @@ export function setWidgetExpanded(expanded: boolean) {
     return;
   }
 
-  const height = expanded ? 100 : 72;
+  // Action bar (improver tool + Improve + Copy) stays visible at all times.
+  // `expanded` is kept for IPC compatibility; both states use the full height.
+  const height = expanded ? 100 : 100;
   widgetWindow.setMinimumSize(240, height);
   widgetWindow.setMaximumSize(240, height);
   widgetWindow.setSize(240, height);

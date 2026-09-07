@@ -13,6 +13,7 @@
     "src/main/db/settings-safety.test.ts",
     "src/main/transcribe/whisper-runtime.test.ts",
     "src/main/utils/file-logger.test.ts",
+    "src/main/prompt-improver/cli-executor.test.ts",
     "src/shared/settings-secrets.test.ts"
   ]
 }

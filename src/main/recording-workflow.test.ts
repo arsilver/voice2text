@@ -11,7 +11,7 @@ test("processes batch recordings, copies text, and persists clipboard-only resul
   const result = await processRecordingSubmission(
     {
       recordingId: "rec-123",
-      audioBytes: new Uint8Array([1, 2, 3]),
+      audioBytes: new Uint8Array(128).fill(1),
       durationMs: 1500,
       sampleRate: 16000,
     },
@@ -67,4 +67,41 @@ test("processes batch recordings, copies text, and persists clipboard-only resul
   ]);
   assert.ok(logEvents.some((event) => JSON.stringify(event).includes("transcription-start")));
   assert.ok(logEvents.some((event) => JSON.stringify(event).includes("clipboard-updated")));
+});
+
+test("rejects empty provider transcripts so silent captures surface as errors", async () => {
+  await assert.rejects(
+    () =>
+      processRecordingSubmission(
+        {
+          recordingId: "rec-empty",
+          audioBytes: new Uint8Array(100),
+          durationMs: 1200,
+          sampleRate: 16000,
+        },
+        {
+          applyDictionary: (text) => text,
+          logger: {
+            info: () => undefined,
+            error: () => undefined,
+          },
+          saveToClipboard: () => undefined,
+          saveTranscription: () => ({ transcriptionMs: 0 }),
+          transcribeAudio: async () => ({
+            provider: "deepgram",
+            model: "nova-3",
+            text: "   ",
+            rawText: "   ",
+            durationMs: 1200,
+            transcriptionMs: 40,
+            usedFallback: false,
+            selectedProvider: "deepgram",
+            fallbackProvider: null,
+            selectedProviderFailed: false,
+            failureMessage: null,
+          }),
+        }
+      ),
+    /No speech detected/
+  );
 });

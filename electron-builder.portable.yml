@@ -1,0 +1,30 @@
+appId: com.craftvoice.desktop
+productName: CraftVoice
+directories:
+  # Portable deliverable lands in dist/ (Vite build outputs stay in dist/main|preload|renderer)
+  output: dist
+  buildResources: build
+files:
+  # Only pack compiled app code — not previous portable artifacts under dist/
+  - dist/main/**/*
+  - dist/preload/**/*
+  - dist/renderer/**/*
+  - package.json
+  - node_modules/**/*
+extraResources:
+  - from: resources
+    to: resources
+    filter:
+      - "**/*"
+      - "!models/**" # lean portable: skip large whisper model .bin files (use cloud providers, or copy models later)
+asarUnpack:
+  - node_modules/**/*.node
+win:
+  icon: icon.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-portable-${arch}.${ext}
+portable:
+  artifactName: ${productName}-${version}-portable-${arch}.${ext}

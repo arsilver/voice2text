@@ -1397,6 +1397,7 @@ textarea::placeholder {
 .widget-action-bar {
   display: flex;
   gap: 3px;
+  align-items: center;
   width: 224px;
   padding: 4px 6px;
   border-radius: 0 0 16px 16px;
@@ -1408,8 +1409,33 @@ textarea::placeholder {
   -webkit-app-region: no-drag;
 }
 
+.widget-tool-select {
+  flex: 0 0 auto;
+  width: 62px;
+  height: 20px;
+  padding: 0 2px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(8, 13, 20, 0.9);
+  color: var(--text);
+  font-size: 0.6rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+
+.widget-tool-select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.widget-tool-select:focus {
+  border-color: rgba(245, 158, 50, 0.7);
+}
+
 .widget-improve-btn {
   flex: 1;
+  min-width: 0;
   height: 20px;
   border-radius: 6px;
   border: 1px solid rgba(245, 158, 50, 0.5);
@@ -1436,6 +1462,11 @@ textarea::placeholder {
   color: rgba(80, 220, 100, 0.9);
 }
 
+.widget-improve-btn-error {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: rgba(252, 165, 165, 0.95);
+}
+
 .widget-copy-toggle {
   width: 42px;
   height: 20px;
@@ -1452,6 +1483,12 @@ textarea::placeholder {
 .widget-copy-toggle-active {
   border-color: rgba(80, 220, 100, 0.5);
   color: rgba(80, 220, 100, 0.9);
+}
+
+.widget-copy-toggle-flash {
+  border-color: rgba(80, 220, 100, 0.85);
+  background: rgba(80, 220, 100, 0.14);
+  color: rgba(120, 240, 140, 0.98);
 }
 
 .widget-shell {

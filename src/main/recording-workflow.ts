@@ -35,6 +35,10 @@ export async function processRecordingSubmission(
     stage: "transcription-start",
   });
 
+  if (submission.audioBytes.length <= 44) {
+    throw new Error("Recording had no audio payload. Check the microphone and try again.");
+  }
+
   const result = await transcribeAudio(Buffer.from(submission.audioBytes), submission.durationMs);
   const transcriptionElapsedMs = now() - transcriptionStartedAt;
   const finalText = applyDictionary(result.text);
@@ -49,6 +53,12 @@ export async function processRecordingSubmission(
     transcriptionElapsedMs,
     usedFallback: result.usedFallback,
   });
+
+  if (!finalText.trim()) {
+    throw new Error(
+      "No speech detected in the recording. Speak while the level meter moves, and confirm the correct microphone in Settings."
+    );
+  }
 
   saveToClipboard(finalText);
   logger.info("recording-stage", {

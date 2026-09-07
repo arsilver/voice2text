@@ -97,7 +97,14 @@ export async function transcribeWithDeepgram(buffer: Buffer, durationMs: number,
 
   const startedAt = Date.now();
   const bytes = new Uint8Array(buffer);
-  const response = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(settings.deepgramModel)}&smart_format=true`, {
+  // Send a full WAV container. Do not also force encoding/sample_rate — those params
+  // make Deepgram treat the body as raw PCM (including the RIFF header), which can
+  // yield empty or garbage transcripts.
+  const url = new URL("https://api.deepgram.com/v1/listen");
+  url.searchParams.set("model", settings.deepgramModel);
+  url.searchParams.set("smart_format", "true");
+
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Token ${settings.deepgramApiKey}`,

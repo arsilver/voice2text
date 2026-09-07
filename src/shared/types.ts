@@ -9,7 +9,7 @@ export type LocalModelSource = "managed" | "bundled";
 export type LocalModelStage = "idle" | "downloading" | "installing" | "ready" | "error";
 export type StartupProfile = "normal" | "minimal" | "safe";
 export type StartupStage = "dom-ready" | "app-mounted" | "interactive";
-export type ImproverTool = "claude" | "codex" | "kimi";
+export type ImproverTool = "claude" | "codex" | "kimi" | "grok";
 export type ImproverState = "idle" | "improving" | "done" | "error";
 export type PromptCategory = "coding" | "planning" | "debugging" | "brainstorming" | "architecture" | "documentation" | "code-review" | "general";
 

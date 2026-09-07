@@ -4,12 +4,15 @@ import workletUrl from "@renderer/audio/pcm-worklet.js?url";
 
 const FINAL_WAV_SAMPLE_RATE = 16000;
 const MAX_RECORDING_DURATION_MS = 10 * 60 * 1000;
+/** Peak RMS below this is treated as a silent capture (muted mic / suspended graph). */
+const SILENCE_PEAK_RMS = 0.0008;
 
 interface RecorderRefs {
   audioContext: AudioContext | null;
   chunks: Float32Array[];
   inputSampleRate: number;
   lastLevelPublishAt: number;
+  peakRms: number;
   recordingId: string | null;
   sink: GainNode | null;
   smoothedLevel: number;
@@ -26,6 +29,7 @@ export function usePcmRecorder() {
     chunks: [],
     inputSampleRate: 0,
     lastLevelPublishAt: 0,
+    peakRms: 0,
     recordingId: null,
     sink: null,
     smoothedLevel: 0,
@@ -44,23 +48,18 @@ export function usePcmRecorder() {
     const recordingId = crypto.randomUUID();
     logRecorderEvent("start-requested", { microphone: selectedMicrophoneId || "default", recordingId });
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: selectedMicrophoneId
-        ? {
-            channelCount: 1,
-            deviceId: { exact: selectedMicrophoneId },
-            echoCancellation: true,
-            noiseSuppression: true,
-          }
-        : {
-            channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
-    });
+    const stream = await openMicrophoneStream(selectedMicrophoneId);
 
+    // Hotkey starts are not a user-gesture on this window. Without resume(), Chromium
+    // often leaves AudioContext suspended and the worklet captures silence.
     const audioContext = new AudioContext();
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
     await audioContext.audioWorklet.addModule(workletUrl);
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
 
     const source = audioContext.createMediaStreamSource(stream);
     const workletNode = new AudioWorkletNode(audioContext, "pcm-recorder-processor");
@@ -71,6 +70,7 @@ export function usePcmRecorder() {
     refs.current.chunks = [];
     refs.current.inputSampleRate = audioContext.sampleRate;
     refs.current.lastLevelPublishAt = 0;
+    refs.current.peakRms = 0;
     refs.current.recordingId = recordingId;
     refs.current.sink = sink;
     refs.current.smoothedLevel = 0;
@@ -82,8 +82,10 @@ export function usePcmRecorder() {
     window.craftvoice.recording.publishLevel(0);
 
     logRecorderEvent("started", {
+      audioContextState: audioContext.state,
       inputSampleRate: audioContext.sampleRate,
       recordingId,
+      trackLabel: stream.getAudioTracks()[0]?.label || "unknown",
     });
 
     workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
@@ -91,8 +93,13 @@ export function usePcmRecorder() {
       refs.current.chunks.push(chunk);
       refs.current.totalSamples += chunk.length;
 
+      const rms = calculateRms(chunk);
+      if (rms > refs.current.peakRms) {
+        refs.current.peakRms = rms;
+      }
+
       const now = performance.now();
-      const nextLevel = smoothLevel(refs.current.smoothedLevel, normalizeLevel(calculateRms(chunk)));
+      const nextLevel = smoothLevel(refs.current.smoothedLevel, normalizeLevel(rms));
       refs.current.smoothedLevel = nextLevel;
 
       if (now - refs.current.lastLevelPublishAt >= 40) {
@@ -117,16 +124,19 @@ export function usePcmRecorder() {
   }
 
   async function stop() {
-    const { audioContext, chunks, inputSampleRate, recordingId, sink, source, startedAt, stream, workletNode } = refs.current;
+    const { audioContext, chunks, inputSampleRate, peakRms, recordingId, sink, source, startedAt, stream, totalSamples, workletNode } =
+      refs.current;
 
     if (!audioContext || !stream || !source || !workletNode || !sink || !recordingId) {
       return;
     }
 
     logRecorderEvent("stop-requested", {
+      audioContextState: audioContext.state,
       bufferedChunks: chunks.length,
+      peakRms: Number(peakRms.toFixed(6)),
       recordingId,
-      totalSamples: refs.current.totalSamples,
+      totalSamples,
     });
 
     source.disconnect();
@@ -139,11 +149,24 @@ export function usePcmRecorder() {
     window.craftvoice.recording.publishLevel(0);
 
     try {
+      if (totalSamples === 0) {
+        throw new Error(
+          "No audio frames were captured. Check Windows microphone privacy, unmute the mic, and try again."
+        );
+      }
+
+      if (peakRms < SILENCE_PEAK_RMS) {
+        throw new Error(
+          "Recording was silent. Unmute the mic (hardware key / OS), confirm the right input in Settings, and watch the level meter while speaking."
+        );
+      }
+
       const encoded = await encodeAudioInWorker(chunks, inputSampleRate, recordingId);
       logRecorderEvent("submit-audio", {
         durationMs,
         encodedBytes: encoded.byteLength,
         encodeMs: encoded.encodeMs,
+        peakRms: Number(peakRms.toFixed(6)),
         recordingId,
         sampleCount: encoded.sampleCount,
       });
@@ -164,6 +187,7 @@ export function usePcmRecorder() {
     refs.current.chunks = [];
     refs.current.inputSampleRate = 0;
     refs.current.lastLevelPublishAt = 0;
+    refs.current.peakRms = 0;
     refs.current.recordingId = null;
     refs.current.sink = null;
     refs.current.smoothedLevel = 0;
@@ -175,6 +199,35 @@ export function usePcmRecorder() {
   }
 
   return { start, stop };
+}
+
+async function openMicrophoneStream(selectedMicrophoneId?: string) {
+  const baseConstraints: MediaTrackConstraints = {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  };
+
+  if (!selectedMicrophoneId) {
+    return navigator.mediaDevices.getUserMedia({ audio: baseConstraints });
+  }
+
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        ...baseConstraints,
+        deviceId: { exact: selectedMicrophoneId },
+      },
+    });
+  } catch (error) {
+    // Device IDs are machine-specific — a setting copied from another PC fails exact match.
+    logRecorderEvent("microphone-fallback-default", {
+      error: error instanceof Error ? error.message : String(error),
+      selectedMicrophoneId,
+    });
+    return navigator.mediaDevices.getUserMedia({ audio: baseConstraints });
+  }
 }
 
 async function encodeAudioInWorker(chunks: Float32Array[], inputSampleRate: number, recordingId: string) {

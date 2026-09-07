@@ -507,7 +507,18 @@ export function SettingsPage({
                   return;
                 }
 
-                if (storedKeyConfigured || clearRequested) {
+                if (clearRequested) {
+                  toggleSecretClear(keyField);
+                  return;
+                }
+
+                if (storedKeyConfigured) {
+                  const confirmed = window.confirm(
+                    `Reset the saved ${formatProviderName(provider)} API key?\n\nThe key will be removed from this device on the next save. This cannot be undone.`
+                  );
+                  if (!confirmed) {
+                    return;
+                  }
                   toggleSecretClear(keyField);
                 }
               }}
@@ -812,7 +823,7 @@ function getApiKeyActionLabel(storedKeyConfigured: boolean, pendingReplacement: 
   }
 
   if (storedKeyConfigured) {
-    return "Clear saved key";
+    return "Reset API key";
   }
 
   return "";

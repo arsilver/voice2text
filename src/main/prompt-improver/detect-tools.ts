@@ -5,7 +5,7 @@ import { getLogger } from "@main/utils/logger";
 
 const log = getLogger("detect-tools");
 
-const TOOLS: ImproverTool[] = ["claude", "codex", "kimi"];
+const TOOLS: ImproverTool[] = ["claude", "codex", "kimi", "grok"];
 const DETECT_TIMEOUT_MS = 5_000;
 
 export async function detectCliTools(): Promise<Record<ImproverTool, boolean>> {

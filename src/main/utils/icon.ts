@@ -1,11 +1,19 @@
 import electron from "electron";
+import fs from "node:fs";
+import path from "node:path";
 
-const { nativeImage } = electron;
+const { app, nativeImage } = electron;
 
-export function createAppIcon() {
-  // Build a 16x16 RGBA bitmap directly so the tray stays crisp on Windows.
-  // Larger installer/executable icons are provided separately as ICO/PNG assets.
+function resolveIconPngPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "resources", "icon.png");
+  }
 
+  return path.resolve(import.meta.dirname, "..", "..", "resources", "icon.png");
+}
+
+/** Procedural fallback if the PNG asset is missing. */
+function createFallbackIcon() {
   const size = 16;
   const buffer = Buffer.alloc(size * size * 4, 0);
 
@@ -66,4 +74,16 @@ export function createAppIcon() {
   }
 
   return nativeImage.createFromBuffer(buffer, { width: size, height: size });
+}
+
+export function createAppIcon() {
+  const iconPath = resolveIconPngPath();
+  if (fs.existsSync(iconPath)) {
+    const image = nativeImage.createFromPath(iconPath);
+    if (!image.isEmpty()) {
+      return image;
+    }
+  }
+
+  return createFallbackIcon();
 }
