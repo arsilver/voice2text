@@ -2,6 +2,18 @@
 
 CraftVoice is a local-first Windows desktop dictation app. Hold a global hotkey (Alt+D), speak naturally, and the transcribed text is copied to your clipboard (or pasted into the focused app).
 
+## Your accounts stay on your machine
+
+This repository is source code only. It does **not** contain anyone's API keys, transcripts, or recordings.
+
+| What | Where it lives |
+|------|----------------|
+| OpenAI / Groq / Deepgram keys | `%APPDATA%\craftvoice\craftvoice.db` (encrypted) on **your** PC |
+| Session history | same local database |
+| Whisper models / binaries | downloaded locally via `npm run assets:download` |
+
+After you clone and run the app, Settings starts empty. Add **your** keys there, or use Local Whisper with no key. Do not copy `%APPDATA%\craftvoice\` or a `.env` into git.
+
 ## Features
 
 - **Multi-provider transcription** — OpenAI (gpt-4o-transcribe), Groq (whisper-large-v3), Deepgram (nova-3), and Local Whisper (whisper.cpp)
@@ -73,3 +85,7 @@ npm run dev
 - All providers use batch-only transcription (single POST after recording stops) for reliability
 - The first recording interaction is toggle mode because Electron global shortcuts do not emit key-up events
 - Windows packaging expects Whisper binaries and models under `resources/`, copied by electron-builder
+
+## License
+
+MIT. See [LICENSE](LICENSE).

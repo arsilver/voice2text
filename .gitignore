@@ -12,9 +12,22 @@ resources/whisper/Release/
 # Build output
 release/
 
+# Secrets and local user data — never commit keys, transcripts, or DBs
+.env
+.env.local
+.env.*.local
+*.db
+*.db-shm
+*.db-wal
+
 # IDE / AI tooling artifacts
 .codex/
 .playwright-mcp/
+.hermes/
+.claude/
+.cursor/
+.grok/
+docs/superpowers/
 
 # Research & generated artifacts
 ai_tools_from_git/
@@ -22,3 +35,9 @@ output/
 research/
 overview-stats-check.png
 scripts/generate_app_summary_pdf.py
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
